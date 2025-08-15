@@ -61,7 +61,34 @@ export default {
 					'accent-foreground': 'hsl(var(--sidebar-accent-foreground))',
 					border: 'hsl(var(--sidebar-border))',
 					ring: 'hsl(var(--sidebar-ring))'
+				},
+				whatsapp: {
+					primary: 'hsl(var(--whatsapp-primary))',
+					dark: 'hsl(var(--whatsapp-dark))',
+					light: 'hsl(var(--whatsapp-light))',
+					bubble: 'hsl(var(--whatsapp-bubble))'
+				},
+				status: {
+					success: 'hsl(var(--success))',
+					warning: 'hsl(var(--warning))',
+					info: 'hsl(var(--info))',
+					online: 'hsl(var(--online))',
+					offline: 'hsl(var(--offline))'
 				}
+			},
+			backgroundImage: {
+				'gradient-primary': 'var(--gradient-primary)',
+				'gradient-success': 'var(--gradient-success)',
+				'gradient-bg': 'var(--gradient-bg)'
+			},
+			boxShadow: {
+				'whatsapp': 'var(--shadow-whatsapp)',
+				'card': 'var(--shadow-card)',
+				'lg-custom': 'var(--shadow-lg)'
+			},
+			transitionTimingFunction: {
+				'smooth': 'cubic-bezier(0.4, 0, 0.2, 1)',
+				'bounce': 'cubic-bezier(0.68, -0.55, 0.265, 1.55)'
 			},
 			borderRadius: {
 				lg: 'var(--radius)',

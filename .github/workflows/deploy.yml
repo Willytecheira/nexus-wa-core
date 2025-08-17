@@ -1,0 +1,211 @@
+name: Deploy WhatsApp Multi-Session API
+
+on:
+  push:
+    branches: [ main, production ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+        - staging
+        - production
+
+env:
+  NODE_VERSION: '18'
+  PM2_APP_NAME: 'whatsapp-api'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        
+    - name: Install frontend dependencies
+      run: npm ci
+      
+    - name: Install server dependencies  
+      run: |
+        cd server
+        npm ci
+        
+    - name: Run frontend tests
+      run: npm run test:ci || true
+      
+    - name: Build frontend
+      run: npm run build
+      
+    - name: Lint code
+      run: |
+        npm run lint || true
+        cd server
+        npm run lint || true
+
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/production' || github.event_name == 'workflow_dispatch'
+    
+    environment: 
+      name: ${{ github.ref == 'refs/heads/production' && 'production' || (github.event.inputs.environment || 'staging') }}
+      
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: |
+        npm ci
+        cd server
+        npm ci --production
+        
+    - name: Build frontend
+      run: npm run build
+      
+    - name: Create deployment package
+      run: |
+        mkdir -p deploy
+        cp -r dist deploy/
+        cp -r server deploy/
+        cp -r public deploy/
+        cp package.json deploy/
+        cp README.md deploy/
+        
+        # Create version info
+        echo "VERSION=$(git rev-parse --short HEAD)" >> deploy/version.txt
+        echo "BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> deploy/version.txt
+        echo "BRANCH=$(git branch --show-current)" >> deploy/version.txt
+        
+    - name: Deploy to staging
+      if: github.ref == 'refs/heads/main' || (github.event.inputs.environment == 'staging')
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.STAGING_HOST }}
+        username: ${{ secrets.STAGING_USER }}
+        key: ${{ secrets.STAGING_SSH_KEY }}
+        port: ${{ secrets.STAGING_PORT || 22 }}
+        script: |
+          set -e
+          cd /var/www/whatsapp-api-staging
+          
+          # Backup current version
+          sudo ./server/deploy.sh backup-only
+          
+          # Pull latest changes
+          git fetch origin
+          git reset --hard origin/main
+          
+          # Deploy
+          sudo ./server/deploy.sh main
+          
+          # Health check
+          sleep 10
+          ./server/health-check.sh quick
+          
+    - name: Deploy to production
+      if: github.ref == 'refs/heads/production' || (github.event.inputs.environment == 'production')
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.PRODUCTION_HOST }}
+        username: ${{ secrets.PRODUCTION_USER }}
+        key: ${{ secrets.PRODUCTION_SSH_KEY }}
+        port: ${{ secrets.PRODUCTION_PORT || 22 }}
+        script: |
+          set -e
+          cd /var/www/whatsapp-api
+          
+          # Create backup
+          sudo ./server/deploy.sh backup-only
+          
+          # Pull latest changes
+          git fetch origin
+          git reset --hard origin/production
+          
+          # Deploy with zero-downtime
+          sudo ./server/deploy.sh production
+          
+          # Extended health check
+          sleep 15
+          ./server/health-check.sh full
+          
+    - name: Notify deployment status
+      if: always()
+      uses: 8398a7/action-slack@v3
+      with:
+        status: ${{ job.status }}
+        channel: '#deployments'
+        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        fields: repo,message,commit,author,action,eventName,ref,workflow
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
+
+  rollback:
+    runs-on: ubuntu-latest
+    if: failure()
+    needs: [build-and-deploy]
+    
+    steps:
+    - name: Rollback on failure
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ github.ref == 'refs/heads/production' && secrets.PRODUCTION_HOST || secrets.STAGING_HOST }}
+        username: ${{ github.ref == 'refs/heads/production' && secrets.PRODUCTION_USER || secrets.STAGING_USER }}
+        key: ${{ github.ref == 'refs/heads/production' && secrets.PRODUCTION_SSH_KEY || secrets.STAGING_SSH_KEY }}
+        port: ${{ github.ref == 'refs/heads/production' && secrets.PRODUCTION_PORT || secrets.STAGING_PORT || 22 }}
+        script: |
+          echo "Deployment failed, initiating rollback..."
+          cd /var/www/whatsapp-api${{ github.ref == 'refs/heads/production' && '' || '-staging' }}
+          sudo ./server/rollback.sh quick
+          
+    - name: Notify rollback
+      uses: 8398a7/action-slack@v3
+      with:
+        status: 'warning'
+        channel: '#deployments'
+        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        text: 'Deployment failed and rollback was initiated'
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
+
+  security-scan:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Run security audit
+      run: |
+        npm audit --audit-level moderate
+        cd server
+        npm audit --audit-level moderate
+        
+    - name: Run CodeQL Analysis
+      uses: github/codeql-action/init@v3
+      with:
+        languages: javascript
+        
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3

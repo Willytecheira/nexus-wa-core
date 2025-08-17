@@ -1,0 +1,239 @@
+name: Automated Backup
+
+on:
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      backup_type:
+        description: 'Type of backup'
+        required: true
+        default: 'full'
+        type: choice
+        options:
+        - full
+        - database-only
+        - config-only
+
+jobs:
+  backup-production:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    
+    steps:
+    - name: Backup production server
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.PRODUCTION_HOST }}
+        username: ${{ secrets.PRODUCTION_USER }}
+        key: ${{ secrets.PRODUCTION_SSH_KEY }}
+        port: ${{ secrets.PRODUCTION_PORT || 22 }}
+        script: |
+          set -e
+          
+          BACKUP_TYPE="${{ github.event.inputs.backup_type || 'full' }}"
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+          BACKUP_DIR="/var/backups/whatsapp-api"
+          PROJECT_DIR="/var/www/whatsapp-api"
+          
+          echo "Starting $BACKUP_TYPE backup..."
+          
+          # Create backup directory
+          mkdir -p "$BACKUP_DIR/automated_$TIMESTAMP"
+          
+          case "$BACKUP_TYPE" in
+            "full")
+              # Full application backup
+              tar -czf "$BACKUP_DIR/automated_$TIMESTAMP/app.tar.gz" \
+                --exclude="node_modules" \
+                --exclude="logs" \
+                --exclude="uploads/temp" \
+                -C "$PROJECT_DIR" .
+              
+              # Database backup
+              if [ -f "$PROJECT_DIR/server/database/whatsapp_api.db" ]; then
+                cp "$PROJECT_DIR/server/database/whatsapp_api.db" \
+                   "$BACKUP_DIR/automated_$TIMESTAMP/database.db"
+              fi
+              
+              # Configuration backup
+              cp "$PROJECT_DIR/server/.env" \
+                 "$BACKUP_DIR/automated_$TIMESTAMP/env.backup" 2>/dev/null || true
+              ;;
+              
+            "database-only")
+              if [ -f "$PROJECT_DIR/server/database/whatsapp_api.db" ]; then
+                cp "$PROJECT_DIR/server/database/whatsapp_api.db" \
+                   "$BACKUP_DIR/automated_$TIMESTAMP/database.db"
+              fi
+              ;;
+              
+            "config-only")
+              cp "$PROJECT_DIR/server/.env" \
+                 "$BACKUP_DIR/automated_$TIMESTAMP/env.backup" 2>/dev/null || true
+              cp "$PROJECT_DIR/server/ecosystem.config.js" \
+                 "$BACKUP_DIR/automated_$TIMESTAMP/ecosystem.backup" 2>/dev/null || true
+              ;;
+          esac
+          
+          # Create backup manifest
+          cat > "$BACKUP_DIR/automated_$TIMESTAMP/manifest.txt" << EOF
+          Backup Type: $BACKUP_TYPE
+          Timestamp: $TIMESTAMP
+          Server: $(hostname)
+          Git Commit: $(cd "$PROJECT_DIR" && git rev-parse HEAD)
+          Application Status: $(pm2 jlist | jq -r '.[] | select(.name=="whatsapp-api") | .pm2_env.status' 2>/dev/null)
+          Database Size: $(du -h "$PROJECT_DIR/server/database/whatsapp_api.db" 2>/dev/null | cut -f1 || echo "N/A")
+          Sessions Count: $(sqlite3 "$PROJECT_DIR/server/database/whatsapp_api.db" "SELECT COUNT(*) FROM sessions;" 2>/dev/null || echo "N/A")
+          EOF
+          
+          # Compress backup
+          tar -czf "$BACKUP_DIR/backup_automated_$TIMESTAMP.tar.gz" \
+            -C "$BACKUP_DIR" "automated_$TIMESTAMP"
+          rm -rf "$BACKUP_DIR/automated_$TIMESTAMP"
+          
+          echo "Backup completed: backup_automated_$TIMESTAMP.tar.gz"
+          
+          # Upload to cloud storage (if configured)
+          if [ -n "${{ secrets.AWS_S3_BUCKET }}" ]; then
+            aws s3 cp "$BACKUP_DIR/backup_automated_$TIMESTAMP.tar.gz" \
+              "s3://${{ secrets.AWS_S3_BUCKET }}/whatsapp-api/backups/" \
+              --storage-class STANDARD_IA
+            echo "Backup uploaded to S3"
+          fi
+          
+          # Cleanup old automated backups (keep last 30)
+          find "$BACKUP_DIR" -name "backup_automated_*" | sort | head -n -30 | xargs rm -f
+          
+          # Health check after backup
+          "$PROJECT_DIR/server/health-check.sh" quick
+          
+    - name: Upload backup to GitHub
+      if: github.event.inputs.backup_type == 'config-only' || github.event_name == 'schedule'
+      uses: actions/upload-artifact@v4
+      with:
+        name: whatsapp-api-config-backup-${{ github.run_number }}
+        path: |
+          server/.env.example
+          server/ecosystem.config.js
+          server/package.json
+        retention-days: 30
+        
+    - name: Notify backup status
+      if: always()
+      uses: 8398a7/action-slack@v3
+      with:
+        status: ${{ job.status }}
+        channel: '#backups'
+        webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+        text: |
+          Automated backup ${{ job.status }}
+          Type: ${{ github.event.inputs.backup_type || 'full' }}
+          Server: Production
+          Time: ${{ github.event.head_commit.timestamp }}
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK }}
+
+  backup-staging:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    
+    steps:
+    - name: Backup staging server
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.STAGING_HOST }}
+        username: ${{ secrets.STAGING_USER }}
+        key: ${{ secrets.STAGING_SSH_KEY }}
+        port: ${{ secrets.STAGING_PORT || 22 }}
+        script: |
+          set -e
+          
+          BACKUP_TYPE="${{ github.event.inputs.backup_type || 'full' }}"
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+          BACKUP_DIR="/var/backups/whatsapp-api-staging"
+          PROJECT_DIR="/var/www/whatsapp-api-staging"
+          
+          echo "Starting staging $BACKUP_TYPE backup..."
+          
+          mkdir -p "$BACKUP_DIR/automated_$TIMESTAMP"
+          
+          case "$BACKUP_TYPE" in
+            "full")
+              tar -czf "$BACKUP_DIR/automated_$TIMESTAMP/app.tar.gz" \
+                --exclude="node_modules" \
+                --exclude="logs" \
+                --exclude="uploads/temp" \
+                -C "$PROJECT_DIR" .
+              
+              if [ -f "$PROJECT_DIR/server/database/whatsapp_api.db" ]; then
+                cp "$PROJECT_DIR/server/database/whatsapp_api.db" \
+                   "$BACKUP_DIR/automated_$TIMESTAMP/database.db"
+              fi
+              ;;
+              
+            "database-only")
+              if [ -f "$PROJECT_DIR/server/database/whatsapp_api.db" ]; then
+                cp "$PROJECT_DIR/server/database/whatsapp_api.db" \
+                   "$BACKUP_DIR/automated_$TIMESTAMP/database.db"
+              fi
+              ;;
+          esac
+          
+          tar -czf "$BACKUP_DIR/backup_staging_$TIMESTAMP.tar.gz" \
+            -C "$BACKUP_DIR" "automated_$TIMESTAMP"
+          rm -rf "$BACKUP_DIR/automated_$TIMESTAMP"
+          
+          echo "Staging backup completed: backup_staging_$TIMESTAMP.tar.gz"
+          
+          # Cleanup old staging backups (keep last 10)
+          find "$BACKUP_DIR" -name "backup_staging_*" | sort | head -n -10 | xargs rm -f
+
+  verify-backups:
+    runs-on: ubuntu-latest
+    needs: [backup-production]
+    if: always()
+    
+    steps:
+    - name: Verify backup integrity
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.PRODUCTION_HOST }}
+        username: ${{ secrets.PRODUCTION_USER }}
+        key: ${{ secrets.PRODUCTION_SSH_KEY }}
+        port: ${{ secrets.PRODUCTION_PORT || 22 }}
+        script: |
+          set -e
+          
+          BACKUP_DIR="/var/backups/whatsapp-api"
+          LATEST_BACKUP=$(find "$BACKUP_DIR" -name "backup_automated_*" | sort | tail -1)
+          
+          if [ -n "$LATEST_BACKUP" ]; then
+            echo "Verifying backup: $(basename "$LATEST_BACKUP")"
+            
+            # Test tar file integrity
+            tar -tzf "$LATEST_BACKUP" > /dev/null
+            echo "Backup archive integrity: OK"
+            
+            # Check backup size
+            BACKUP_SIZE=$(du -h "$LATEST_BACKUP" | cut -f1)
+            echo "Backup size: $BACKUP_SIZE"
+            
+            # Extract and verify database if present
+            TEMP_DIR="/tmp/backup_verify_$$"
+            mkdir -p "$TEMP_DIR"
+            tar -xzf "$LATEST_BACKUP" -C "$TEMP_DIR"
+            
+            if [ -f "$TEMP_DIR/automated_*/database.db" ]; then
+              DB_FILE=$(find "$TEMP_DIR" -name "database.db")
+              sqlite3 "$DB_FILE" "PRAGMA integrity_check;" | grep -q "ok"
+              echo "Database integrity: OK"
+            fi
+            
+            rm -rf "$TEMP_DIR"
+            echo "Backup verification completed successfully"
+          else
+            echo "No backup found for verification"
+            exit 1
+          fi

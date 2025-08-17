@@ -18,7 +18,7 @@ PROJECT_NAME="whatsapp-api"
 PROJECT_DIR="/var/www/whatsapp-api"
 BACKUP_DIR="/var/backups/whatsapp-api"
 LOG_FILE="/var/log/whatsapp-api-deploy.log"
-GITHUB_REPO="https://github.com/yourusername/whatsapp-multi-session-api.git"
+GITHUB_REPO="${GITHUB_REPO:-https://github.com/yourusername/whatsapp-multi-session-api.git}"
 BRANCH="${1:-main}"
 
 # Functions

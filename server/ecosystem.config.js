@@ -54,7 +54,7 @@ module.exports = {
       user: 'ubuntu',
       host: ['your-server-ip'],
       ref: 'origin/main',
-      repo: 'git@github.com:yourusername/whatsapp-multi-session-api.git',
+      repo: process.env.GITHUB_REPO || 'git@github.com:yourusername/whatsapp-multi-session-api.git',
       path: '/var/www/whatsapp-api',
       'pre-deploy-local': '',
       'post-deploy': 'cd server && npm install --production && pm2 reload ecosystem.config.js --env production',

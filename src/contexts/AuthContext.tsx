@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useToast } from '@/hooks/use-toast';
+import { apiClient, type LoginResponse } from '@/lib/api';
 
 interface User {
   id: string;
@@ -19,135 +20,120 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Default admin user for demo
-const DEFAULT_ADMIN: User = {
-  id: '1',
-  username: 'admin',
-  role: 'admin',
-  lastLogin: new Date().toISOString(),
-  status: 'active'
-};
-
-const DEFAULT_USERS = [
-  DEFAULT_ADMIN,
-  {
-    id: '2',
-    username: 'operator',
-    role: 'operator' as const,
-    lastLogin: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
-    status: 'active' as const
-  },
-  {
-    id: '3', 
-    username: 'viewer',
-    role: 'viewer' as const,
-    lastLogin: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-    status: 'active' as const
-  }
-];
-
-const DEFAULT_PASSWORDS = {
-  admin: 'admin123',
-  operator: 'operator123',
-  viewer: 'viewer123'
-};
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
 
   useEffect(() => {
-    // Check for stored auth
-    const storedUser = localStorage.getItem('auth_user');
-    const storedToken = localStorage.getItem('auth_token');
-    
-    if (storedUser && storedToken) {
-      try {
-        const parsedUser = JSON.parse(storedUser);
-        // Verify token isn't expired (24h)
-        const tokenData = JSON.parse(atob(storedToken.split('.')[1]));
-        if (tokenData.exp * 1000 > Date.now()) {
-          setUser(parsedUser);
-        } else {
-          localStorage.removeItem('auth_user');
-          localStorage.removeItem('auth_token');
+    const initializeAuth = async () => {
+      // Check for stored auth
+      const storedUser = localStorage.getItem('auth_user') || sessionStorage.getItem('auth_user');
+      const storedToken = localStorage.getItem('auth_token') || sessionStorage.getItem('auth_token');
+      
+      if (storedUser && storedToken) {
+        try {
+          const parsedUser = JSON.parse(storedUser);
+          
+          // Verify token format and expiration
+          if (storedToken.includes('.')) {
+            const tokenParts = storedToken.split('.');
+            if (tokenParts.length === 3) {
+              const payload = JSON.parse(atob(tokenParts[1]));
+              if (payload.exp * 1000 > Date.now()) {
+                apiClient.setToken(storedToken);
+                setUser(parsedUser);
+                console.log('Auth restored for user:', parsedUser.username);
+              } else {
+                console.log('Token expired, clearing auth');
+                clearStoredAuth();
+              }
+            } else {
+              console.log('Invalid token format, clearing auth');
+              clearStoredAuth();
+            }
+          } else {
+            console.log('Invalid token format, clearing auth');
+            clearStoredAuth();
+          }
+        } catch (error) {
+          console.error('Auth restore error:', error);
+          clearStoredAuth();
         }
-      } catch (error) {
-        console.error('Auth restore error:', error);
-        localStorage.removeItem('auth_user');
-        localStorage.removeItem('auth_token');
+      } else {
+        console.log('No stored auth found');
       }
-    }
-    
-    setLoading(false);
+      
+      setLoading(false);
+    };
+
+    const clearStoredAuth = () => {
+      localStorage.removeItem('auth_user');
+      localStorage.removeItem('auth_token');
+      sessionStorage.removeItem('auth_user');
+      sessionStorage.removeItem('auth_token');
+      apiClient.clearToken();
+    };
+
+    initializeAuth();
   }, []);
 
   const login = async (username: string, password: string, rememberMe = false): Promise<boolean> => {
     setLoading(true);
     
     try {
-      // Simulate API call delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      console.log('Attempting login for:', username);
       
-      // Check credentials
-      const userRecord = DEFAULT_USERS.find(u => u.username === username);
-      const validPassword = DEFAULT_PASSWORDS[username as keyof typeof DEFAULT_PASSWORDS];
+      const response = await apiClient.login({ username, password });
       
-      if (!userRecord || password !== validPassword) {
+      if (!response.success || !response.data) {
         toast({
           title: "Login Failed",
-          description: "Invalid username or password",
+          description: response.error || "Invalid username or password",
           variant: "destructive"
         });
         return false;
       }
 
-      if (userRecord.status === 'inactive') {
+      const { token, user: userData } = response.data;
+      
+      if (!userData || !token) {
         toast({
-          title: "Account Disabled",
-          description: "Your account has been disabled. Contact administrator.",
+          title: "Login Failed",
+          description: "Invalid response from server",
           variant: "destructive"
         });
         return false;
       }
 
-      // Update last login
-      const updatedUser = {
-        ...userRecord,
+      // Update user with current timestamp
+      const updatedUser: User = {
+        ...userData,
         lastLogin: new Date().toISOString()
       };
 
-      // Create JWT-like token (for demo)
-      const token = btoa(JSON.stringify({
-        userId: updatedUser.id,
-        username: updatedUser.username,
-        role: updatedUser.role,
-        iat: Math.floor(Date.now() / 1000),
-        exp: Math.floor(Date.now() / 1000) + (24 * 60 * 60) // 24h
-      }));
-
       setUser(updatedUser);
       
-      if (rememberMe) {
-        localStorage.setItem('auth_user', JSON.stringify(updatedUser));
-        localStorage.setItem('auth_token', `header.${token}.signature`);
-      } else {
-        sessionStorage.setItem('auth_user', JSON.stringify(updatedUser));
-        sessionStorage.setItem('auth_token', `header.${token}.signature`);
-      }
+      // Store auth data
+      const storage = rememberMe ? localStorage : sessionStorage;
+      storage.setItem('auth_user', JSON.stringify(updatedUser));
+      storage.setItem('auth_token', token);
+      
+      // Set token in API client
+      apiClient.setToken(token);
 
       toast({
         title: "Welcome back!",
         description: `Logged in as ${updatedUser.username} (${updatedUser.role})`
       });
 
+      console.log('Login successful for:', updatedUser.username);
       return true;
     } catch (error) {
       console.error('Login error:', error);
       toast({
         title: "Login Error",
-        description: "An unexpected error occurred. Please try again.",
+        description: error instanceof Error ? error.message : "An unexpected error occurred. Please try again.",
         variant: "destructive"
       });
       return false;
@@ -156,12 +142,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      // Call logout endpoint
+      await apiClient.logout();
+    } catch (error) {
+      console.error('Logout API error:', error);
+      // Continue with local logout even if API fails
+    }
+    
     setUser(null);
     localStorage.removeItem('auth_user');
     localStorage.removeItem('auth_token');
     sessionStorage.removeItem('auth_user');
     sessionStorage.removeItem('auth_token');
+    apiClient.clearToken();
     
     toast({
       title: "Logged out",

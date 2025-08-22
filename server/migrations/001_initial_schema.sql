@@ -2,23 +2,25 @@
 -- Version: 001_initial_schema
 -- Created: 2024-08-17
 
--- Users table for authentication
+-- Users table for authentication (updated to be compatible with existing schema)
 CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT PRIMARY KEY,
     username VARCHAR(255) NOT NULL UNIQUE,
     email VARCHAR(255) UNIQUE,
-    password_hash VARCHAR(255) NOT NULL,
+    password TEXT NOT NULL,
+    password_hash VARCHAR(255),
     role VARCHAR(50) DEFAULT 'user',
+    status TEXT DEFAULT 'active',
     is_active BOOLEAN DEFAULT 1,
     last_login DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- WhatsApp sessions table
+-- WhatsApp sessions table (updated to be compatible with existing schema)
 CREATE TABLE IF NOT EXISTS sessions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id VARCHAR(255) NOT NULL UNIQUE,
+    id TEXT PRIMARY KEY,
+    session_id VARCHAR(255),
     name VARCHAR(255) NOT NULL,
     phone_number VARCHAR(20),
     status VARCHAR(50) DEFAULT 'disconnected',
@@ -26,28 +28,35 @@ CREATE TABLE IF NOT EXISTS sessions (
     qr_expires_at DATETIME,
     webhook_url VARCHAR(500),
     is_active BOOLEAN DEFAULT 1,
+    last_activity DATETIME,
     last_active DATETIME,
     created_by INTEGER,
+    user_id TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (created_by) REFERENCES users(id)
+    FOREIGN KEY (created_by) REFERENCES users(id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
--- Messages table for logging
+-- Messages table for logging (updated to be compatible with existing schema)
 CREATE TABLE IF NOT EXISTS messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id TEXT PRIMARY KEY,
     session_id VARCHAR(255) NOT NULL,
     message_id VARCHAR(255),
-    chat_id VARCHAR(255) NOT NULL,
-    from_number VARCHAR(20),
-    to_number VARCHAR(20),
-    message_type VARCHAR(50) DEFAULT 'text',
+    chat_id VARCHAR(255),
+    from_number VARCHAR(20) NOT NULL,
+    to_number VARCHAR(20) NOT NULL,
+    message_body TEXT,
     content TEXT,
+    message_type VARCHAR(50) DEFAULT 'text',
     media_url VARCHAR(500),
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
     status VARCHAR(50) DEFAULT 'sent',
+    user_id TEXT,
+    is_incoming BOOLEAN DEFAULT false,
     is_from_me BOOLEAN DEFAULT 0,
-    FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 );
 
 -- Contacts table

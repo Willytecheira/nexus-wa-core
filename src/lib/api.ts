@@ -2,7 +2,7 @@
 const API_BASE_URL = import.meta.env.VITE_API_URL || (
   window.location.hostname === 'localhost' 
     ? 'http://localhost:3000'
-    : `${window.location.protocol}//${window.location.host}`
+    : window.location.origin
 );
 
 console.log('API_BASE_URL:', API_BASE_URL);

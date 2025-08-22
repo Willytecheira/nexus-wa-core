@@ -62,6 +62,11 @@ const corsOptions = {
     // Allow requests with no origin (mobile apps, curl, Postman, etc.)
     if (!origin) return callback(null, true);
     
+    // Allow same-origin requests (frontend served from same server)
+    if (origin && origin.includes(`:${PORT}`)) {
+      return callback(null, true);
+    }
+    
     // Check if origin is in allowed list
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
@@ -73,6 +78,11 @@ const corsOptions = {
       if (localhostRegex.test(origin)) {
         return callback(null, true);
       }
+    }
+    
+    // In production, allow requests from same host
+    if (process.env.NODE_ENV === 'production') {
+      return callback(null, true);
     }
     
     logger.warn(`CORS blocked origin: ${origin}. Allowed origins: ${allowedOrigins.join(', ')}`);

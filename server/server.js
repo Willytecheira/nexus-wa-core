@@ -199,7 +199,7 @@ app.get('/api/sessions/:sessionId/qr', AuthMiddleware, async (req, res) => {
       return res.status(404).json({ error: 'QR code not available' });
     }
 
-    res.json({ qrCode });
+    res.json({ qr: qrCode });
   } catch (error) {
     logger.error('Get QR code error:', error);
     res.status(500).json({ error: 'Failed to get QR code' });

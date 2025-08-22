@@ -193,10 +193,27 @@ app.post('/api/sessions/:sessionId/restart', AuthMiddleware, async (req, res) =>
 app.get('/api/sessions/:sessionId/qr', AuthMiddleware, async (req, res) => {
   try {
     const { sessionId } = req.params;
-    const qrCode = await sessionManager.getQRCode(sessionId);
+    let qrCode = await sessionManager.getQRCode(sessionId);
     
+    // If QR code is not available, try to restart the session to generate a new one
     if (!qrCode) {
-      return res.status(404).json({ error: 'QR code not available' });
+      const session = sessionManager.getSession(sessionId);
+      
+      if (session && (session.status === 'disconnected' || session.status === 'ready')) {
+        logger.info(`QR code not available for session ${sessionId}, restarting session...`);
+        await sessionManager.restartSession(sessionId);
+        
+        // Wait a moment for the QR to be generated
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        qrCode = await sessionManager.getQRCode(sessionId);
+      }
+      
+      if (!qrCode) {
+        return res.status(404).json({ 
+          error: 'QR code not available', 
+          suggestion: 'Session may need to be restarted manually' 
+        });
+      }
     }
 
     res.json({ qr: qrCode });

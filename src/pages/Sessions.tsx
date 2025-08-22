@@ -189,16 +189,22 @@ export function Sessions() {
 
   const showQrCode = async (session: Session) => {
     try {
+      setIsLoading(true);
       const response = await apiClient.getQRCode(session.id);
       if (response.success && response.data?.qr) {
         setSelectedSession({ ...session, qrCode: response.data.qr });
         setIsQrDialogOpen(true);
       } else {
+        // If QR is not available, offer to restart the session
         toast({
-          title: "Error",
-          description: response.error || "QR Code not available",
-          variant: "destructive",
+          title: "QR Code Not Available",
+          description: "The QR code is not available. This usually happens when it has expired or the session is already connected.",
         });
+        
+        // Automatically try to restart and generate new QR for disconnected sessions
+        if (session.status === 'disconnected' || session.status === 'error') {
+          handleRestartAndShowQr(session);
+        }
       }
     } catch (error) {
       toast({
@@ -206,6 +212,60 @@ export function Sessions() {
         description: "Failed to load QR code",
         variant: "destructive",
       });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleRestartAndShowQr = async (session: Session) => {
+    try {
+      setIsLoading(true);
+      
+      toast({
+        title: "Restarting Session",
+        description: "Restarting session to generate a new QR code...",
+      });
+      
+      // First restart the session
+      await apiClient.restartSession(session.id);
+      
+      // Update session status locally
+      setSessions(prev =>
+        prev.map(s =>
+          s.id === session.id ? { ...s, status: 'connecting' } : s
+        )
+      );
+
+      // Wait for session to initialize and generate QR
+      setTimeout(async () => {
+        try {
+          const response = await apiClient.getQRCode(session.id);
+          if (response.success && response.data?.qr) {
+            setSelectedSession({ ...session, status: 'connecting', qrCode: response.data.qr });
+            setIsQrDialogOpen(true);
+            toast({
+              title: "Success",
+              description: "Session restarted and QR code generated",
+            });
+          } else {
+            toast({
+              title: "Warning",
+              description: "Session restarted but QR code may take a moment to generate",
+            });
+          }
+        } catch (error) {
+          console.error('Error getting QR after restart:', error);
+        }
+        setIsLoading(false);
+      }, 3000);
+      
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to restart session",
+        variant: "destructive",
+      });
+      setIsLoading(false);
     }
   };
 

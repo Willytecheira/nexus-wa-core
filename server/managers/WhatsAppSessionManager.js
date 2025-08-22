@@ -328,6 +328,10 @@ class WhatsAppSessionManager {
     return this.qrCodes.get(sessionId) || null;
   }
 
+  getSession(sessionId) {
+    return this.sessions.get(sessionId) || null;
+  }
+
   async getAllSessions() {
     const sessions = Array.from(this.sessions.values()).map(session => ({
       id: session.id,

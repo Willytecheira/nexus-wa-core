@@ -27,6 +27,16 @@ interface LoginResponse {
   };
 }
 
+interface Session {
+  id: string;
+  name: string;
+  phone?: string;
+  status: 'disconnected' | 'connecting' | 'connected' | 'qr' | 'error';
+  lastSeen?: string;
+  messagesCount?: number;
+  qrCode?: string;
+}
+
 class ApiClient {
   private baseURL: string;
   private token: string | null = null;
@@ -113,6 +123,34 @@ class ApiClient {
     return this.request('/health');
   }
 
+  // Session Management Methods
+  async getSessions(): Promise<ApiResponse<Session[]>> {
+    return this.request<Session[]>('/api/sessions');
+  }
+
+  async createSession(name: string): Promise<ApiResponse<Session>> {
+    return this.request<Session>('/api/sessions', {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    });
+  }
+
+  async deleteSession(sessionId: string): Promise<ApiResponse> {
+    return this.request(`/api/sessions/${sessionId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async restartSession(sessionId: string): Promise<ApiResponse> {
+    return this.request(`/api/sessions/${sessionId}/restart`, {
+      method: 'POST',
+    });
+  }
+
+  async getQRCode(sessionId: string): Promise<ApiResponse<{ qr: string }>> {
+    return this.request<{ qr: string }>(`/api/sessions/${sessionId}/qr`);
+  }
+
   setToken(token: string) {
     this.token = token;
   }
@@ -129,4 +167,4 @@ class ApiClient {
 }
 
 export const apiClient = new ApiClient(config.apiUrl);
-export type { LoginRequest, LoginResponse, ApiResponse };
+export type { LoginRequest, LoginResponse, ApiResponse, Session };

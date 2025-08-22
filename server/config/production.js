@@ -15,14 +15,20 @@ const validateProductionConfig = () => {
     errors.push('CORS_ORIGINS must be configured for production');
   }
   
-  // Check file permissions
+  // Check file permissions - create directories if they don't exist
   const criticalDirs = ['logs', 'uploads', 'qr', 'sessions', 'database'];
   for (const dir of criticalDirs) {
     const dirPath = path.join(__dirname, '..', dir);
     try {
+      // Create directory if it doesn't exist
+      if (!fs.existsSync(dirPath)) {
+        fs.mkdirSync(dirPath, { recursive: true, mode: 0o755 });
+        console.log(`✅ Created directory: ${dir}`);
+      }
+      // Check if writable
       fs.accessSync(dirPath, fs.constants.W_OK);
     } catch (error) {
-      errors.push(`Directory ${dir} is not writable`);
+      errors.push(`Directory ${dir} is not writable or cannot be created`);
     }
   }
   

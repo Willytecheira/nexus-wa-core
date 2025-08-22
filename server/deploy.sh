@@ -1,241 +1,394 @@
 #!/bin/bash
 
-# WhatsApp Multi-Session API - Production Deployment Script
-# Version: 2.0.0
-# Author: WhatsApp API Team
+# WhatsApp Multi-Session API Deployment Script
+# Usage: ./deploy.sh [domain] [--skip-backup]
 
-set -e  # Exit on any error
+set -e
 
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 # Configuration
-PROJECT_NAME="whatsapp-api"
 PROJECT_DIR="/var/www/whatsapp-api"
+SERVICE_USER="www-data"
 BACKUP_DIR="/var/backups/whatsapp-api"
-LOG_FILE="/var/log/whatsapp-api-deploy.log"
-GITHUB_REPO="${GITHUB_REPO:-https://github.com/yourusername/whatsapp-multi-session-api.git}"
-BRANCH="${1:-main}"
+DOMAIN=${1:-"localhost"}
+SKIP_BACKUP=${2}
 
-# Functions
-log() {
-    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')]${NC} $1" | tee -a "$LOG_FILE"
+# Helper functions
+print_status() {
+    echo -e "${GREEN}[INFO]${NC} $1"
 }
 
-error() {
-    echo -e "${RED}[ERROR]${NC} $1" | tee -a "$LOG_FILE"
-    exit 1
+print_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
 }
 
-warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1" | tee -a "$LOG_FILE"
+print_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
 }
 
-info() {
-    echo -e "${BLUE}[INFO]${NC} $1" | tee -a "$LOG_FILE"
+print_header() {
+    echo -e "${BLUE}========================================${NC}"
+    echo -e "${BLUE} WhatsApp API Deployment Script${NC}"
+    echo -e "${BLUE}========================================${NC}"
 }
 
-# Pre-deployment checks
-pre_deploy_checks() {
-    log "Starting pre-deployment checks..."
-    
-    # Check if running as root or with sudo
+# Check if running as root
+check_root() {
     if [[ $EUID -ne 0 ]]; then
-        error "This script must be run as root or with sudo"
+        print_error "This script must be run as root"
+        exit 1
     fi
-    
-    # Check system requirements
-    if ! command -v node &> /dev/null; then
-        error "Node.js is not installed"
-    fi
-    
-    if ! command -v pm2 &> /dev/null; then
-        error "PM2 is not installed"
-    fi
-    
-    if ! command -v git &> /dev/null; then
-        error "Git is not installed"
-    fi
-    
-    # Check Node.js version
-    NODE_VERSION=$(node -v | cut -d'v' -f2)
-    REQUIRED_VERSION="18.0.0"
-    if ! dpkg --compare-versions "$NODE_VERSION" "ge" "$REQUIRED_VERSION"; then
-        error "Node.js version $NODE_VERSION is too old. Required: $REQUIRED_VERSION+"
-    fi
-    
-    log "Pre-deployment checks completed successfully"
 }
 
 # Create backup
 create_backup() {
-    log "Creating backup..."
-    
-    TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-    BACKUP_PATH="$BACKUP_DIR/backup_$TIMESTAMP"
-    
-    mkdir -p "$BACKUP_PATH"
-    
-    # Backup current application
-    if [ -d "$PROJECT_DIR" ]; then
-        cp -r "$PROJECT_DIR" "$BACKUP_PATH/app"
-        log "Application backup created at $BACKUP_PATH/app"
+    if [[ "$SKIP_BACKUP" == "--skip-backup" ]]; then
+        print_warning "Skipping backup as requested"
+        return
     fi
     
-    # Backup database
-    if [ -f "$PROJECT_DIR/server/database/whatsapp_api.db" ]; then
-        cp "$PROJECT_DIR/server/database/whatsapp_api.db" "$BACKUP_PATH/database.db"
-        log "Database backup created at $BACKUP_PATH/database.db"
+    print_status "Creating backup..."
+    
+    # Create backup directory
+    mkdir -p "$BACKUP_DIR"
+    
+    # Create timestamped backup
+    BACKUP_NAME="whatsapp-api-$(date +%Y%m%d-%H%M%S)"
+    BACKUP_PATH="$BACKUP_DIR/$BACKUP_NAME"
+    
+    # Backup application files
+    cp -r "$PROJECT_DIR" "$BACKUP_PATH"
+    
+    # Backup databases if they exist
+    if [ -d "$PROJECT_DIR/server/database" ]; then
+        print_status "Backing up database..."
+        cp -r "$PROJECT_DIR/server/database" "$BACKUP_PATH/database-backup"
     fi
     
-    # Backup sessions
-    if [ -d "$PROJECT_DIR/server/sessions" ]; then
-        cp -r "$PROJECT_DIR/server/sessions" "$BACKUP_PATH/"
-        log "Sessions backup created at $BACKUP_PATH/sessions"
-    fi
+    # Create backup info file
+    cat > "$BACKUP_PATH/backup-info.txt" << EOF
+Backup created: $(date)
+Git commit: $(cd $PROJECT_DIR && git rev-parse HEAD 2>/dev/null || echo "unknown")
+Domain: $DOMAIN
+Environment: production
+EOF
     
-    # Store backup path for potential rollback
-    echo "$BACKUP_PATH" > /tmp/whatsapp-api-last-backup
-    
-    log "Backup completed: $BACKUP_PATH"
+    print_status "Backup created: $BACKUP_PATH"
 }
 
-# Deploy application
-deploy_application() {
-    log "Starting application deployment..."
+# Pre-deployment checks
+pre_deploy_checks() {
+    print_status "Running pre-deployment checks..."
     
-    # Stop current application
-    if pm2 list | grep -q "$PROJECT_NAME"; then
-        log "Stopping current application..."
-        pm2 stop "$PROJECT_NAME" || true
+    # Check if project directory exists
+    if [ ! -d "$PROJECT_DIR" ]; then
+        print_error "Project directory not found: $PROJECT_DIR"
+        exit 1
     fi
     
-    # Create project directory if it doesn't exist
-    mkdir -p "$PROJECT_DIR"
+    # Check Node.js
+    if ! command -v node &> /dev/null; then
+        print_error "Node.js is not installed"
+        exit 1
+    fi
+    
+    # Check PM2
+    if ! command -v pm2 &> /dev/null; then
+        print_error "PM2 is not installed"
+        exit 1
+    fi
+    
+    # Run pre-deploy script
+    cd "$PROJECT_DIR/server"
+    if [ -f "scripts/pre-deploy-check.js" ]; then
+        print_status "Running pre-deployment validation..."
+        node scripts/pre-deploy-check.js
+    fi
+}
+
+# Stop application
+stop_application() {
+    print_status "Stopping application..."
+    
+    # Stop PM2 processes
+    pm2 stop all 2>/dev/null || true
+    
+    # Wait for processes to stop
+    sleep 3
+}
+
+# Update code
+update_code() {
+    print_status "Updating code from repository..."
+    
     cd "$PROJECT_DIR"
     
-    # Clone or update repository
-    if [ ! -d ".git" ]; then
-        log "Cloning repository..."
-        git clone "$GITHUB_REPO" .
-    else
-        log "Updating repository..."
-        git fetch origin
-        git reset --hard "origin/$BRANCH"
-        git clean -fd
-    fi
+    # Fetch latest changes
+    git fetch origin
     
-    # Switch to specified branch
-    git checkout "$BRANCH"
-    git pull origin "$BRANCH"
+    # Reset to latest main branch
+    git reset --hard origin/main
     
-    # Install dependencies for server
-    log "Installing server dependencies..."
-    cd server
-    npm ci --production
+    # Update permissions
+    chown -R "$SERVICE_USER:$SERVICE_USER" "$PROJECT_DIR"
+}
+
+# Install dependencies and build
+build_application() {
+    print_status "Installing dependencies and building application..."
     
-    # Install dependencies for frontend
-    log "Installing frontend dependencies..."
-    cd ..
-    npm ci
+    cd "$PROJECT_DIR"
     
-    # Build frontend
-    log "Building frontend..."
+    # Install frontend dependencies and build
+    npm install
     npm run build
     
-    # Copy environment file if it doesn't exist
-    if [ ! -f "server/.env" ]; then
-        cp "server/.env.example" "server/.env"
-        warning "Environment file created from example. Please configure it manually."
+    # Install backend dependencies
+    cd server
+    npm install --production
+    
+    # Generate production configuration
+    if [ -f "scripts/generate-jwt-secret.js" ]; then
+        print_status "Generating production secrets..."
+        node scripts/generate-jwt-secret.js
     fi
     
     # Set proper permissions
-    chown -R www-data:www-data "$PROJECT_DIR"
-    chmod -R 755 "$PROJECT_DIR"
-    
-    log "Application deployment completed"
+    chown -R "$SERVICE_USER:$SERVICE_USER" "$PROJECT_DIR"
 }
 
-# Start services
-start_services() {
-    log "Starting services..."
+# Configure environment
+configure_environment() {
+    print_status "Configuring production environment..."
     
     cd "$PROJECT_DIR/server"
     
-    # Start application with PM2
-    if pm2 list | grep -q "$PROJECT_NAME"; then
-        pm2 restart ecosystem.config.js
+    # Create production .env if it doesn't exist
+    if [ ! -f ".env" ]; then
+        cp .env.example .env
+        
+        # Update domain-specific settings
+        sed -i "s|FRONTEND_URL=.*|FRONTEND_URL=https://$DOMAIN|g" .env
+        sed -i "s|CORS_ORIGINS=.*|CORS_ORIGINS=https://$DOMAIN,https://www.$DOMAIN|g" .env
+        
+        print_warning "Environment file created. Please review and update:"
+        print_warning "  - JWT_SECRET (should be automatically generated)"
+        print_warning "  - Database credentials (if using external DB)"
+        print_warning "  - Other production-specific settings"
+    fi
+}
+
+# Run database migrations
+run_migrations() {
+    print_status "Running database migrations..."
+    
+    cd "$PROJECT_DIR/server"
+    
+    if [ -f "migrations/migrate.js" ]; then
+        node migrations/migrate.js
     else
-        pm2 start ecosystem.config.js
+        print_warning "No migration script found, skipping..."
+    fi
+}
+
+# Configure Nginx
+configure_nginx() {
+    print_status "Configuring Nginx..."
+    
+    # Copy Nginx configuration
+    if [ -f "$PROJECT_DIR/server/nginx/whatsapp-api.conf" ]; then
+        cp "$PROJECT_DIR/server/nginx/whatsapp-api.conf" "/etc/nginx/sites-available/whatsapp-api"
+        
+        # Update domain in Nginx config
+        sed -i "s|server_name _;|server_name $DOMAIN www.$DOMAIN;|g" "/etc/nginx/sites-available/whatsapp-api"
+        
+        # Enable site
+        ln -sf "/etc/nginx/sites-available/whatsapp-api" "/etc/nginx/sites-enabled/"
+        
+        # Remove default site if it exists
+        rm -f "/etc/nginx/sites-enabled/default"
+        
+        # Test Nginx configuration
+        nginx -t
+        
+        # Reload Nginx
+        systemctl reload nginx
+        
+        print_status "Nginx configured for domain: $DOMAIN"
+    else
+        print_warning "Nginx configuration not found, skipping..."
+    fi
+}
+
+# Start application
+start_application() {
+    print_status "Starting application..."
+    
+    cd "$PROJECT_DIR/server"
+    
+    # Start with PM2
+    if [ -f "ecosystem.config.js" ]; then
+        pm2 start ecosystem.config.js --env production
+    else
+        pm2 start server.js --name "whatsapp-api" --env production
     fi
     
     # Save PM2 configuration
     pm2 save
     
-    log "Services started successfully"
+    # Wait for application to start
+    print_status "Waiting for application to start..."
+    sleep 10
 }
 
 # Health check
 health_check() {
-    log "Performing health check..."
+    print_status "Performing health check..."
     
-    # Wait for application to start
-    sleep 10
+    # Check if application is responding
+    local max_attempts=5
+    local attempt=1
     
-    # Check if PM2 process is running
-    if ! pm2 list | grep -q "$PROJECT_NAME.*online"; then
-        error "Application failed to start"
+    while [ $attempt -le $max_attempts ]; do
+        if curl -f http://localhost:3000/health >/dev/null 2>&1; then
+            print_status "✅ Application is healthy!"
+            break
+        else
+            print_warning "Health check attempt $attempt/$max_attempts failed, retrying..."
+            sleep 5
+            ((attempt++))
+        fi
+    done
+    
+    if [ $attempt -gt $max_attempts ]; then
+        print_error "❌ Health check failed after $max_attempts attempts"
+        return 1
     fi
-    
-    # Check if application responds
-    if ! curl -f http://localhost:3000/health > /dev/null 2>&1; then
-        warning "Health check endpoint not responding"
-    else
-        log "Health check passed"
-    fi
-    
-    log "Deployment completed successfully!"
 }
 
-# Cleanup old backups
+# Clean up old backups
 cleanup_backups() {
-    log "Cleaning up old backups..."
+    print_status "Cleaning up old backups..."
     
     # Keep only last 10 backups
-    find "$BACKUP_DIR" -name "backup_*" -type d | sort -r | tail -n +11 | xargs rm -rf
+    cd "$BACKUP_DIR"
+    ls -t | tail -n +11 | xargs -r rm -rf
     
-    log "Backup cleanup completed"
+    print_status "Backup cleanup completed"
 }
 
-# Main deployment process
+# Display deployment info
+display_deployment_info() {
+    print_header
+    echo -e "${GREEN}✅ Deployment completed successfully!${NC}"
+    echo ""
+    echo -e "${BLUE}Application URLs:${NC}"
+    echo -e "  Frontend: https://$DOMAIN"
+    echo -e "  API: https://$DOMAIN/api"
+    echo -e "  Health: https://$DOMAIN/health"
+    echo ""
+    echo -e "${BLUE}Useful commands:${NC}"
+    echo -e "  View logs: pm2 logs whatsapp-api"
+    echo -e "  Check status: pm2 status"
+    echo -e "  Restart app: pm2 restart whatsapp-api"
+    echo -e "  Monitor: pm2 monit"
+    echo ""
+    echo -e "${BLUE}Next steps:${NC}"
+    echo -e "  1. Set up SSL certificate: certbot --nginx -d $DOMAIN"
+    echo -e "  2. Test all functionality"
+    echo -e "  3. Update DNS if needed"
+    echo -e "  4. Change default admin password"
+    echo ""
+}
+
+# Rollback function
+rollback() {
+    local backup_name=$1
+    
+    if [ -z "$backup_name" ]; then
+        print_error "Please specify backup name for rollback"
+        echo "Available backups:"
+        ls -la "$BACKUP_DIR"
+        exit 1
+    fi
+    
+    local backup_path="$BACKUP_DIR/$backup_name"
+    
+    if [ ! -d "$backup_path" ]; then
+        print_error "Backup not found: $backup_path"
+        exit 1
+    fi
+    
+    print_warning "Rolling back to: $backup_name"
+    
+    # Stop application
+    stop_application
+    
+    # Restore backup
+    rm -rf "$PROJECT_DIR"
+    cp -r "$backup_path" "$PROJECT_DIR"
+    
+    # Start application
+    cd "$PROJECT_DIR/server"
+    pm2 start ecosystem.config.js --env production
+    
+    print_status "Rollback completed"
+}
+
+# Main deployment function
 main() {
-    log "Starting deployment of WhatsApp Multi-Session API"
-    log "Branch: $BRANCH"
+    print_header
     
+    # Handle rollback
+    if [ "$1" = "rollback" ]; then
+        rollback "$2"
+        exit 0
+    fi
+    
+    # Pre-flight checks
+    check_root
     pre_deploy_checks
-    create_backup
-    deploy_application
-    start_services
-    health_check
-    cleanup_backups
     
-    log "Deployment completed successfully!"
-    info "Application is running at: http://localhost:3000"
-    info "Admin panel: http://localhost:3000/admin"
-    info "API docs: http://localhost:3000/docs"
+    # Create backup
+    create_backup
+    
+    # Deployment steps
+    stop_application
+    update_code
+    build_application
+    configure_environment
+    run_migrations
+    configure_nginx
+    start_application
+    
+    # Post-deployment
+    if health_check; then
+        cleanup_backups
+        display_deployment_info
+    else
+        print_error "Deployment failed health check!"
+        print_warning "Consider rolling back: ./deploy.sh rollback [backup-name]"
+        exit 1
+    fi
 }
 
-# Trap errors and provide rollback option
-trap 'error "Deployment failed! Run ./rollback.sh to restore previous version"' ERR
+# Show usage if no arguments
+if [ $# -eq 0 ]; then
+    echo "Usage: $0 <domain> [--skip-backup]"
+    echo "       $0 rollback <backup-name>"
+    echo ""
+    echo "Examples:"
+    echo "  $0 myapi.com"
+    echo "  $0 localhost --skip-backup"
+    echo "  $0 rollback whatsapp-api-20231201-120000"
+    exit 1
+fi
 
 # Run main function
-main
-
-# Create deployment success marker
-echo "$(date)" > "$PROJECT_DIR/.last-deployment"
-
-log "Deployment process completed!"
+main "$@"

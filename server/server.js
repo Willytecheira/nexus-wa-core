@@ -59,8 +59,8 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/qr', express.static(path.join(__dirname, 'qr')));
 
-// Serve frontend static files from public directory
-app.use(express.static(path.join(__dirname, 'public')));
+// Serve frontend static files from dist directory
+app.use(express.static(path.join(__dirname, '..', 'dist')));
 
 // Ensure directories exist
 fs.ensureDirSync(path.join(__dirname, 'uploads'));
@@ -417,7 +417,7 @@ app.get('*', (req, res) => {
   }
   
   // Serve index.html for all other routes (SPA)
-  const indexPath = path.join(__dirname, 'public', 'index.html');
+  const indexPath = path.join(__dirname, '..', 'dist', 'index.html');
   if (fs.existsSync(indexPath)) {
     res.sendFile(indexPath);
   } else {

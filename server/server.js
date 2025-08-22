@@ -94,6 +94,9 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.use('/qr', express.static(path.join(__dirname, 'qr')));
 
+// Serve frontend static files from public directory
+app.use(express.static(path.join(__dirname, 'public')));
+
 // Ensure directories exist
 fs.ensureDirSync(path.join(__dirname, 'uploads'));
 fs.ensureDirSync(path.join(__dirname, 'qr'));
@@ -424,9 +427,20 @@ app.use((error, req, res, next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-// 404 handler
-app.use('*', (req, res) => {
-  res.status(404).json({ error: 'Route not found' });
+// Serve frontend for all non-API routes (SPA support)
+app.get('*', (req, res) => {
+  // Don't serve index.html for API routes
+  if (req.path.startsWith('/api/')) {
+    return res.status(404).json({ error: 'API route not found' });
+  }
+  
+  // Serve index.html for all other routes (SPA)
+  const indexPath = path.join(__dirname, 'public', 'index.html');
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    res.status(404).json({ error: 'Frontend not built. Run npm run build first.' });
+  }
 });
 
 // Initialize database and start server

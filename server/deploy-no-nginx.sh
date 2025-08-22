@@ -76,11 +76,7 @@ cd $PROJECT_DIR
 sudo -u $SERVICE_USER npm install
 sudo -u $SERVICE_USER npm run build
 
-# Update static files
-print_status "Updating static files..."
-rm -rf $PROJECT_DIR/server/public/*
-cp -r $PROJECT_DIR/dist/* $PROJECT_DIR/server/public/
-chown -R $SERVICE_USER:$SERVICE_USER $PROJECT_DIR/server/public
+# Static files are now served directly from dist directory
 
 # Run database migrations
 print_status "Running database migrations..."

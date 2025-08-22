@@ -21,6 +21,9 @@ const logger = require('./utils/logger');
 
 // Initialize Express app
 const app = express();
+
+// Trust proxy for proper IP detection behind reverse proxy
+app.set('trust proxy', 1);
 const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {

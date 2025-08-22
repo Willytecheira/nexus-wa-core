@@ -18,6 +18,8 @@ const WhatsAppSessionManager = require('./managers/WhatsAppSessionManager');
 const DatabaseManager = require('./managers/DatabaseManager');
 const AuthMiddleware = require('./middleware/auth');
 const logger = require('./utils/logger');
+const { getJWTSecret, getCORSConfig, getRateLimitConfig } = require('./config/security');
+const { initializeEnvironment } = require('./utils/environment');
 
 // Initialize Express app
 const app = express();
@@ -26,14 +28,11 @@ const app = express();
 app.set('trust proxy', 1);
 const server = http.createServer(app);
 const io = socketIo(server, {
-  cors: {
-    origin: process.env.FRONTEND_URL || "http://localhost:5173",
-    methods: ["GET", "POST"]
-  }
+  cors: getCORSConfig()
 });
 
 const PORT = process.env.PORT || 3000;
-const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key';
+const JWT_SECRET = getJWTSecret();
 
 // Initialize managers
 const sessionManager = new WhatsAppSessionManager(io);
@@ -45,58 +44,11 @@ app.use(helmet({
 }));
 
 // Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later.'
-});
+const limiter = rateLimit(getRateLimitConfig());
 app.use('/api/', limiter);
 
-// CORS configuration
-const getAllowedOrigins = () => {
-  const corsOrigins = process.env.CORS_ORIGINS || process.env.FRONTEND_URL || 'http://localhost:5173';
-  return corsOrigins.split(',').map(origin => origin.trim());
-};
-
-const corsOptions = {
-  origin: (origin, callback) => {
-    const allowedOrigins = getAllowedOrigins();
-    
-    // Allow requests with no origin (mobile apps, curl, Postman, etc.)
-    if (!origin) return callback(null, true);
-    
-    // Allow same-origin requests (frontend served from same server)
-    if (origin && origin.includes(`:${PORT}`)) {
-      return callback(null, true);
-    }
-    
-    // Check if origin is in allowed list
-    if (allowedOrigins.includes(origin)) {
-      return callback(null, true);
-    }
-    
-    // Allow localhost and 127.0.0.1 in development
-    if (process.env.NODE_ENV !== 'production') {
-      const localhostRegex = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
-      if (localhostRegex.test(origin)) {
-        return callback(null, true);
-      }
-    }
-    
-    // In production, allow requests from same host
-    if (process.env.NODE_ENV === 'production') {
-      return callback(null, true);
-    }
-    
-    logger.warn(`CORS blocked origin: ${origin}. Allowed origins: ${allowedOrigins.join(', ')}`);
-    callback(new Error('Not allowed by CORS'));
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-};
-
-app.use(cors(corsOptions));
+// CORS configuration  
+app.use(cors(getCORSConfig()));
 
 app.use(compression());
 app.use(morgan('combined', { stream: { write: message => logger.info(message.trim()) } }));
@@ -459,6 +411,9 @@ app.get('*', (req, res) => {
 // Initialize database and start server
 async function startServer() {
   try {
+    // Initialize environment
+    initializeEnvironment();
+    
     // Initialize database
     await db.initialize();
     

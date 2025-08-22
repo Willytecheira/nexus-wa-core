@@ -1,11 +1,8 @@
 // API configuration and utilities
-const API_BASE_URL = import.meta.env.VITE_API_URL || (
-  window.location.hostname === 'localhost' 
-    ? 'http://localhost:3000'
-    : window.location.origin
-);
+import { logger } from './logger';
+import { config } from './config';
 
-console.log('API_BASE_URL:', API_BASE_URL);
+logger.info('API initialized', { baseUrl: config.apiUrl });
 
 interface ApiResponse<T = any> {
   success?: boolean;
@@ -36,7 +33,7 @@ class ApiClient {
 
   constructor(baseURL: string) {
     this.baseURL = baseURL;
-    this.token = localStorage.getItem('auth_token') || sessionStorage.getItem('auth_token');
+    this.token = localStorage.getItem(config.tokenStorageKey) || sessionStorage.getItem(config.tokenStorageKey);
   }
 
   private async request<T>(
@@ -54,12 +51,13 @@ class ApiClient {
       headers['Authorization'] = `Bearer ${this.token}`;
     }
 
-    console.log(`Making API request to: ${url}`, { method: options.method || 'GET' });
+    logger.debug('Making API request', { url, method: options.method || 'GET' });
 
     try {
       const response = await fetch(url, {
         ...options,
         headers,
+        signal: AbortSignal.timeout(config.requestTimeout),
       });
 
       const contentType = response.headers.get('content-type');
@@ -71,7 +69,7 @@ class ApiClient {
         data = await response.text();
       }
 
-      console.log(`API Response (${response.status}):`, data);
+      logger.debug('API response received', { status: response.status, url });
 
       if (!response.ok) {
         throw new Error(
@@ -83,7 +81,7 @@ class ApiClient {
 
       return { success: true, data };
     } catch (error) {
-      console.error(`API Error for ${url}:`, error);
+      logger.error('API request failed', { url, error: error instanceof Error ? error.message : 'Network error' });
       const errorMessage = error instanceof Error ? error.message : 'Network error';
       return { success: false, error: errorMessage };
     }
@@ -121,8 +119,8 @@ class ApiClient {
 
   clearToken() {
     this.token = null;
-    localStorage.removeItem('auth_token');
-    sessionStorage.removeItem('auth_token');
+    localStorage.removeItem(config.tokenStorageKey);
+    sessionStorage.removeItem(config.tokenStorageKey);
   }
 
   getToken(): string | null {
@@ -130,5 +128,5 @@ class ApiClient {
   }
 }
 
-export const apiClient = new ApiClient(API_BASE_URL);
+export const apiClient = new ApiClient(config.apiUrl);
 export type { LoginRequest, LoginResponse, ApiResponse };

@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { apiClient, type LoginResponse } from '@/lib/api';
+import { logger } from '@/lib/logger';
+import { config } from '@/lib/config';
 
 interface User {
   id: string;
@@ -28,8 +30,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const initializeAuth = async () => {
       // Check for stored auth
-      const storedUser = localStorage.getItem('auth_user') || sessionStorage.getItem('auth_user');
-      const storedToken = localStorage.getItem('auth_token') || sessionStorage.getItem('auth_token');
+      const storedUser = localStorage.getItem(config.userStorageKey) || sessionStorage.getItem(config.userStorageKey);
+      const storedToken = localStorage.getItem(config.tokenStorageKey) || sessionStorage.getItem(config.tokenStorageKey);
       
       if (storedUser && storedToken) {
         try {
@@ -43,35 +45,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               if (payload.exp * 1000 > Date.now()) {
                 apiClient.setToken(storedToken);
                 setUser(parsedUser);
-                console.log('Auth restored for user:', parsedUser.username);
+                logger.info('Auth restored', { username: parsedUser.username });
               } else {
-                console.log('Token expired, clearing auth');
+                logger.info('Token expired, clearing auth');
                 clearStoredAuth();
               }
             } else {
-              console.log('Invalid token format, clearing auth');
+              logger.warn('Invalid token format, clearing auth');
               clearStoredAuth();
             }
           } else {
-            console.log('Invalid token format, clearing auth');
+            logger.warn('Invalid token format, clearing auth');
             clearStoredAuth();
           }
         } catch (error) {
-          console.error('Auth restore error:', error);
+          logger.error('Auth restore error', { error });
           clearStoredAuth();
         }
       } else {
-        console.log('No stored auth found');
+        logger.info('No stored auth found');
       }
       
       setLoading(false);
     };
 
     const clearStoredAuth = () => {
-      localStorage.removeItem('auth_user');
-      localStorage.removeItem('auth_token');
-      sessionStorage.removeItem('auth_user');
-      sessionStorage.removeItem('auth_token');
+      localStorage.removeItem(config.userStorageKey);
+      localStorage.removeItem(config.tokenStorageKey);
+      sessionStorage.removeItem(config.userStorageKey);
+      sessionStorage.removeItem(config.tokenStorageKey);
       apiClient.clearToken();
     };
 
@@ -82,7 +84,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLoading(true);
     
     try {
-      console.log('Attempting login for:', username);
+      logger.info('Attempting login', { username });
       
       const response = await apiClient.login({ username, password });
       
@@ -116,8 +118,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       // Store auth data
       const storage = rememberMe ? localStorage : sessionStorage;
-      storage.setItem('auth_user', JSON.stringify(updatedUser));
-      storage.setItem('auth_token', token);
+      storage.setItem(config.userStorageKey, JSON.stringify(updatedUser));
+      storage.setItem(config.tokenStorageKey, token);
       
       // Set token in API client
       apiClient.setToken(token);
@@ -127,10 +129,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         description: `Logged in as ${updatedUser.username} (${updatedUser.role})`
       });
 
-      console.log('Login successful for:', updatedUser.username);
+      logger.info('Login successful', { username: updatedUser.username, role: updatedUser.role });
       return true;
     } catch (error) {
-      console.error('Login error:', error);
+      logger.error('Login error', { error });
       toast({
         title: "Login Error",
         description: error instanceof Error ? error.message : "An unexpected error occurred. Please try again.",
@@ -147,15 +149,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Call logout endpoint
       await apiClient.logout();
     } catch (error) {
-      console.error('Logout API error:', error);
+      logger.error('Logout API error', { error });
       // Continue with local logout even if API fails
     }
     
     setUser(null);
-    localStorage.removeItem('auth_user');
-    localStorage.removeItem('auth_token');
-    sessionStorage.removeItem('auth_user');
-    sessionStorage.removeItem('auth_token');
+    localStorage.removeItem(config.userStorageKey);
+    localStorage.removeItem(config.tokenStorageKey);
+    sessionStorage.removeItem(config.userStorageKey);
+    sessionStorage.removeItem(config.tokenStorageKey);
     apiClient.clearToken();
     
     toast({

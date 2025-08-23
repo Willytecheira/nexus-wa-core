@@ -398,6 +398,34 @@ app.get('/api/metrics', AuthMiddleware, async (req, res) => {
   }
 });
 
+// Get session metrics
+app.get('/api/sessions/metrics', AuthMiddleware, async (req, res) => {
+  try {
+    const metrics = await db.getSessionsMetrics();
+    res.json(metrics);
+  } catch (error) {
+    logger.error('Get sessions metrics error:', error);
+    res.status(500).json({ error: 'Failed to get sessions metrics' });
+  }
+});
+
+// Get individual session metrics
+app.get('/api/sessions/:id/metrics', AuthMiddleware, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const metrics = await db.getSessionMetrics(id);
+    
+    if (!metrics) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    res.json(metrics);
+  } catch (error) {
+    logger.error('Get session metrics error:', error);
+    res.status(500).json({ error: 'Failed to get session metrics' });
+  }
+});
+
 // Socket.IO connection handling
 io.on('connection', (socket) => {
   logger.info(`Client connected: ${socket.id}`);

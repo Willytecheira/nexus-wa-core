@@ -48,12 +48,18 @@ class DatabaseManager {
       // Sessions table
       `CREATE TABLE IF NOT EXISTS sessions (
         id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
         name TEXT NOT NULL,
-        status TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('connecting', 'qr', 'authenticated', 'ready', 'disconnected')),
         phone_number TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        connected_at DATETIME,
         last_activity DATETIME,
-        user_id TEXT,
+        messages_sent INTEGER DEFAULT 0,
+        messages_received INTEGER DEFAULT 0,
+        connection_time INTEGER DEFAULT 0,
+        error_count INTEGER DEFAULT 0,
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
       )`,
 
@@ -223,10 +229,98 @@ class DatabaseManager {
   }
 
   async updateSessionStatus(sessionId, status, phoneNumber = null) {
-    await this.run(
-      'UPDATE sessions SET status = ?, phone_number = ?, last_activity = CURRENT_TIMESTAMP WHERE id = ?',
-      [status, phoneNumber, sessionId]
+    const params = [status, new Date().toISOString(), sessionId];
+    let sql = 'UPDATE sessions SET status = ?, updated_at = ?';
+    
+    if (phoneNumber) {
+      sql += ', phone_number = ?';
+      params.splice(2, 0, phoneNumber);
+    }
+    
+    // Update connected_at when status becomes ready
+    if (status === 'ready') {
+      sql += ', connected_at = ?';
+      params.splice(-1, 0, new Date().toISOString());
+    }
+    
+    sql += ' WHERE id = ?';
+    
+    return this.run(sql, params);
+  }
+
+  async updateSessionActivity(sessionId) {
+    return this.run(
+      'UPDATE sessions SET last_activity = ? WHERE id = ?',
+      [new Date().toISOString(), sessionId]
     );
+  }
+
+  async incrementSessionMessageCount(sessionId, type = 'sent') {
+    const field = type === 'sent' ? 'messages_sent' : 'messages_received';
+    return this.run(
+      `UPDATE sessions SET ${field} = ${field} + 1, last_activity = ? WHERE id = ?`,
+      [new Date().toISOString(), sessionId]
+    );
+  }
+
+  async incrementSessionErrors(sessionId) {
+    return this.run(
+      'UPDATE sessions SET error_count = error_count + 1 WHERE id = ?',
+      [sessionId]
+    );
+  }
+
+  async getSessionMetrics(sessionId) {
+    return this.get(`
+      SELECT 
+        id,
+        name,
+        status,
+        phone_number,
+        created_at,
+        connected_at,
+        last_activity,
+        messages_sent,
+        messages_received,
+        connection_time,
+        error_count,
+        CASE 
+          WHEN connected_at IS NOT NULL AND status = 'ready' 
+          THEN ((julianday('now') - julianday(connected_at)) * 24 * 60 * 60)
+          ELSE 0 
+        END as current_uptime_seconds
+      FROM sessions 
+      WHERE id = ?
+    `, [sessionId]);
+  }
+
+  async getSessionsMetrics() {
+    return this.all(`
+      SELECT 
+        id,
+        name,
+        status,
+        phone_number,
+        created_at,
+        connected_at,
+        last_activity,
+        messages_sent,
+        messages_received,
+        connection_time,
+        error_count,
+        CASE 
+          WHEN connected_at IS NOT NULL AND status = 'ready' 
+          THEN ((julianday('now') - julianday(connected_at)) * 24 * 60 * 60)
+          ELSE 0 
+        END as current_uptime_seconds,
+        CASE 
+          WHEN last_activity IS NOT NULL 
+          THEN ((julianday('now') - julianday(last_activity)) * 24 * 60 * 60)
+          ELSE NULL 
+        END as seconds_since_last_activity
+      FROM sessions 
+      ORDER BY created_at DESC
+    `);
   }
 
   async deleteSession(sessionId) {

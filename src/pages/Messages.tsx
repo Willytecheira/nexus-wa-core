@@ -197,11 +197,11 @@ export default function Messages() {
                               </SelectTrigger>
                             </FormControl>
                             <SelectContent>
-                              {sessions.map((session) => (
-                                <SelectItem key={session.id} value={session.id}>
-                                  {session.name} {session.phone && `(${session.phone})`}
-                                </SelectItem>
-                              ))}
+            {sessions.map((session) => (
+              <SelectItem key={session.id} value={session.id}>
+                {session.name} {session.phone_number && `(${session.phone_number})`}
+              </SelectItem>
+            ))}
                             </SelectContent>
                           </Select>
                           <FormMessage />

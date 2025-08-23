@@ -4,27 +4,23 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import { apiClient, Session } from '@/lib/api';
+import { SessionCard } from '@/components/SessionCard';
 import { 
   Plus, 
-  MoreVertical, 
   Smartphone, 
   MessageSquare, 
   Clock,
-  QrCode,
-  RotateCcw,
-  Trash2,
-  Wifi,
-  WifiOff,
-  AlertCircle,
-  Loader2
+  Loader2,
+  RefreshCw,
+  Activity,
+  Users,
+  QrCode
 } from 'lucide-react';
 
-export function Sessions() {
+export default function Sessions() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isQrDialogOpen, setIsQrDialogOpen] = useState(false);
@@ -32,6 +28,7 @@ export function Sessions() {
   const [newSessionName, setNewSessionName] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
+  const [qrCode, setQrCode] = useState<string>('');
   const { toast } = useToast();
 
   // Load sessions on component mount
@@ -39,88 +36,85 @@ export function Sessions() {
     loadSessions();
   }, []);
 
+  // Auto-refresh sessions every 30 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!isLoading) {
+        loadSessions();
+      }
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, [isLoading]);
+
   const loadSessions = async () => {
     try {
-      const response = await apiClient.getSessions();
+      const response = await apiClient.getSessionsMetrics();
       if (response.success && response.data) {
         setSessions(response.data);
       } else {
         toast({
           title: "Error",
           description: response.error || "Failed to load sessions",
-          variant: "destructive",
+          variant: "destructive"
         });
       }
     } catch (error) {
+      console.error('Load sessions error:', error);
       toast({
         title: "Error",
-        description: "Failed to connect to server",
-        variant: "destructive",
+        description: "Failed to load sessions",
+        variant: "destructive"
       });
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Helper functions for status display
-  const getStatusColor = (status: Session['status']) => {
-    switch (status) {
-      case 'connected':
-        return 'bg-status-success text-white';
-      case 'connecting':
-      case 'qr':
-        return 'bg-status-warning text-white';
-      case 'disconnected':
-        return 'bg-destructive text-white';
-      case 'error':
-        return 'bg-destructive text-white';
-      default:
-        return 'bg-muted text-muted-foreground';
-    }
-  };
+  // Calculate overview metrics
+  const totalSessions = sessions.length;
+  const activeSessions = sessions.filter(s => s.status === 'ready').length;
+  const totalMessages = sessions.reduce((sum, s) => sum + (s.messages_sent || 0) + (s.messages_received || 0), 0);
+  const totalUptime = sessions
+    .filter(s => s.current_uptime_seconds)
+    .reduce((sum, s) => sum + (s.current_uptime_seconds || 0), 0);
 
-  const getStatusIcon = (status: Session['status']) => {
-    switch (status) {
-      case 'connected':
-        return <Wifi className="h-4 w-4" />;
-      case 'connecting':
-      case 'qr':
-        return <Loader2 className="h-4 w-4 animate-spin" />;
-      case 'disconnected':
-        return <WifiOff className="h-4 w-4" />;
-      case 'error':
-        return <AlertCircle className="h-4 w-4" />;
-      default:
-        return <WifiOff className="h-4 w-4" />;
+  const formatTotalUptime = (seconds: number) => {
+    const hours = Math.floor(seconds / 3600);
+    if (hours > 24) {
+      const days = Math.floor(hours / 24);
+      return `${days}d ${hours % 24}h`;
     }
+    return `${hours}h ${Math.floor((seconds % 3600) / 60)}m`;
   };
 
   const handleCreateSession = async () => {
     if (!newSessionName.trim()) return;
-    
+
     setIsCreating(true);
     try {
-      const response = await apiClient.createSession(newSessionName);
-      if (response.success && response.data) {
-        setSessions([...sessions, response.data]);
+      const response = await apiClient.createSession(newSessionName.trim());
+      if (response.success) {
+        toast({
+          title: "Success",
+          description: "Session created successfully"
+        });
         setNewSessionName('');
         setIsCreateDialogOpen(false);
-        toast({
-          title: "Session Created",
-          description: `Session "${newSessionName}" has been created successfully.`,
-        });
+        await loadSessions();
       } else {
         toast({
           title: "Error",
           description: response.error || "Failed to create session",
-          variant: "destructive",
+          variant: "destructive"
         });
       }
     } catch (error) {
+      console.error('Create session error:', error);
       toast({
         title: "Error",
         description: "Failed to create session",
-        variant: "destructive",
+        variant: "destructive"
       });
     } finally {
       setIsCreating(false);
@@ -128,348 +122,307 @@ export function Sessions() {
   };
 
   const handleDeleteSession = async (sessionId: string) => {
-    const sessionToDelete = sessions.find(s => s.id === sessionId);
     try {
       const response = await apiClient.deleteSession(sessionId);
       if (response.success) {
-        setSessions(sessions.filter(session => session.id !== sessionId));
         toast({
-          title: "Session Deleted",
-          description: `Session "${sessionToDelete?.name}" has been deleted.`,
-          variant: "destructive",
+          title: "Success",
+          description: "Session deleted successfully"
         });
+        setSessions(sessions.filter(s => s.id !== sessionId));
       } else {
         toast({
           title: "Error",
           description: response.error || "Failed to delete session",
-          variant: "destructive",
+          variant: "destructive"
         });
       }
     } catch (error) {
+      console.error('Delete session error:', error);
       toast({
         title: "Error",
         description: "Failed to delete session",
-        variant: "destructive",
+        variant: "destructive"
       });
     }
   };
 
   const handleRestartSession = async (sessionId: string) => {
-    const sessionToRestart = sessions.find(s => s.id === sessionId);
     try {
       const response = await apiClient.restartSession(sessionId);
       if (response.success) {
-        // Update session status to connecting
-        setSessions(sessions.map(session => 
-          session.id === sessionId 
-            ? { ...session, status: 'connecting' as const }
-            : session
-        ));
         toast({
-          title: "Session Restarting",
-          description: `Session "${sessionToRestart?.name}" is restarting...`,
+          title: "Success",
+          description: "Session restarted successfully"
         });
-        // Refresh sessions after a short delay
-        setTimeout(loadSessions, 2000);
+        // Update the session status
+        setSessions(sessions.map(s => 
+          s.id === sessionId ? { ...s, status: 'connecting' as const } : s
+        ));
       } else {
         toast({
           title: "Error",
           description: response.error || "Failed to restart session",
-          variant: "destructive",
+          variant: "destructive"
         });
       }
     } catch (error) {
+      console.error('Restart session error:', error);
       toast({
         title: "Error",
         description: "Failed to restart session",
-        variant: "destructive",
+        variant: "destructive"
       });
     }
   };
 
   const showQrCode = async (session: Session) => {
     try {
-      setIsLoading(true);
       const response = await apiClient.getQRCode(session.id);
       if (response.success && response.data?.qr) {
-        setSelectedSession({ ...session, qrCode: response.data.qr });
+        setQrCode(response.data.qr);
+        setSelectedSession(session);
         setIsQrDialogOpen(true);
       } else {
-        // If QR is not available, offer to restart the session
-        toast({
-          title: "QR Code Not Available",
-          description: "The QR code is not available. This usually happens when it has expired or the session is already connected.",
-        });
-        
-        // Automatically try to restart and generate new QR for disconnected sessions
-        if (session.status === 'disconnected' || session.status === 'error') {
-          handleRestartAndShowQr(session);
-        }
+        // Try to restart and get QR
+        await handleRestartAndShowQr(session.id);
       }
     } catch (error) {
+      console.error('Get QR code error:', error);
       toast({
         title: "Error",
-        description: "Failed to load QR code",
-        variant: "destructive",
+        description: "Failed to get QR code",
+        variant: "destructive"
       });
-    } finally {
-      setIsLoading(false);
     }
   };
 
-  const handleRestartAndShowQr = async (session: Session) => {
+  const handleRestartAndShowQr = async (sessionId: string) => {
     try {
-      setIsLoading(true);
-      
-      toast({
-        title: "Restarting Session",
-        description: "Restarting session to generate a new QR code...",
-      });
-      
-      // First restart the session
-      await apiClient.restartSession(session.id);
-      
-      // Update session status locally
-      setSessions(prev =>
-        prev.map(s =>
-          s.id === session.id ? { ...s, status: 'connecting' } : s
-        )
-      );
-
-      // Wait for session to initialize and generate QR
-      setTimeout(async () => {
-        try {
-          const response = await apiClient.getQRCode(session.id);
-          if (response.success && response.data?.qr) {
-            setSelectedSession({ ...session, status: 'connecting', qrCode: response.data.qr });
-            setIsQrDialogOpen(true);
-            toast({
-              title: "Success",
-              description: "Session restarted and QR code generated",
-            });
+      const restartResponse = await apiClient.restartSession(sessionId);
+      if (restartResponse.success) {
+        // Wait a moment for QR to be generated
+        setTimeout(async () => {
+          const qrResponse = await apiClient.getQRCode(sessionId);
+          if (qrResponse.success && qrResponse.data?.qr) {
+            setQrCode(qrResponse.data.qr);
+            const session = sessions.find(s => s.id === sessionId);
+            if (session) {
+              setSelectedSession(session);
+              setIsQrDialogOpen(true);
+            }
           } else {
             toast({
-              title: "Warning",
-              description: "Session restarted but QR code may take a moment to generate",
+              title: "Error",
+              description: "Failed to generate QR code after restart",
+              variant: "destructive"
             });
           }
-        } catch (error) {
-          console.error('Error getting QR after restart:', error);
-        }
-        setIsLoading(false);
-      }, 3000);
-      
+        }, 3000);
+      }
     } catch (error) {
+      console.error('Restart and show QR error:', error);
       toast({
         title: "Error",
         description: "Failed to restart session",
-        variant: "destructive",
+        variant: "destructive"
       });
-      setIsLoading(false);
     }
   };
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+      <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">WhatsApp Sessions</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Sessions</h1>
           <p className="text-muted-foreground">
-            Manage your WhatsApp Web sessions and their connections.
+            Manage your WhatsApp sessions and connections
           </p>
         </div>
         
-        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-          <DialogTrigger asChild>
-            <Button className="bg-gradient-primary hover:bg-gradient-primary/90 shadow-whatsapp">
-              <Plus className="mr-2 h-4 w-4" />
-              New Session
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Create New Session</DialogTitle>
-              <DialogDescription>
-                Create a new WhatsApp session. You'll need to scan the QR code with your phone.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div>
-                <Label htmlFor="sessionName">Session Name</Label>
-                <Input
-                  id="sessionName"
-                  placeholder="e.g., Business Account, Support Team"
-                  value={newSessionName}
-                  onChange={(e) => setNewSessionName(e.target.value)}
-                />
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={loadSessions} disabled={isLoading} className="gap-2">
+            <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+          
+          <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+            <DialogTrigger asChild>
+              <Button className="gap-2">
+                <Plus className="h-4 w-4" />
+                New Session
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-[425px]">
+              <DialogHeader>
+                <DialogTitle>Create New Session</DialogTitle>
+                <DialogDescription>
+                  Create a new WhatsApp session. You'll need to scan a QR code to connect.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-4 py-4">
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="name" className="text-right">
+                    Name
+                  </Label>
+                  <Input
+                    id="name"
+                    value={newSessionName}
+                    onChange={(e) => setNewSessionName(e.target.value)}
+                    className="col-span-3"
+                    placeholder="e.g., Support Bot"
+                  />
+                </div>
               </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleCreateSession} disabled={!newSessionName.trim() || isCreating}>
-                {isCreating ? (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                ) : (
-                  <Plus className="h-4 w-4 mr-2" />
-                )}
-                {isCreating ? 'Creating...' : 'Create Session'}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+              <DialogFooter>
+                <Button
+                  type="submit"
+                  onClick={handleCreateSession}
+                  disabled={!newSessionName.trim() || isCreating}
+                  className="gap-2"
+                >
+                  {isCreating && <Loader2 className="h-4 w-4 animate-spin" />}
+                  Create Session
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
+      </div>
+
+      {/* Overview Metrics */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Sessions</CardTitle>
+            <Users className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{totalSessions}</div>
+            <p className="text-xs text-muted-foreground">
+              {activeSessions} currently active
+            </p>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Active Sessions</CardTitle>
+            <Activity className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-green-600">{activeSessions}</div>
+            <p className="text-xs text-muted-foreground">
+              {totalSessions > 0 ? Math.round((activeSessions / totalSessions) * 100) : 0}% online
+            </p>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Messages</CardTitle>
+            <MessageSquare className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{totalMessages.toLocaleString()}</div>
+            <p className="text-xs text-muted-foreground">
+              All sessions combined
+            </p>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Uptime</CardTitle>
+            <Clock className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{formatTotalUptime(totalUptime)}</div>
+            <p className="text-xs text-muted-foreground">
+              Combined connection time
+            </p>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Sessions Grid */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {/* Sessions Grid */}
-        {isLoading ? (
-          <Card className="col-span-full">
-            <CardContent className="flex flex-col items-center justify-center py-12">
-              <Loader2 className="h-8 w-8 animate-spin mb-4" />
-              <p className="text-muted-foreground">Loading sessions...</p>
-            </CardContent>
-          </Card>
-        ) : sessions.length === 0 ? (
-          <Card className="col-span-full">
-            <CardContent className="flex flex-col items-center justify-center py-12">
-              <Smartphone className="h-12 w-12 text-muted-foreground mb-4" />
-              <h3 className="text-lg font-semibold mb-2">No Sessions Yet</h3>
-              <p className="text-muted-foreground text-center mb-4">
-                Create your first WhatsApp session to start managing conversations.
-              </p>
-              <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Create First Session
-                  </Button>
-                </DialogTrigger>
-              </Dialog>
-            </CardContent>
-          </Card>
-        ) : (
-          sessions.map((session) => (
-            <Card key={session.id} className="hover:shadow-card transition-shadow">
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Smartphone className="h-5 w-5 text-whatsapp-primary" />
-                    <CardTitle className="text-lg">{session.name}</CardTitle>
-                  </div>
-                  
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                        <MoreVertical className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem 
-                        onClick={() => showQrCode(session)}
-                        disabled={session.status === 'connected'}
-                      >
-                        <QrCode className="h-4 w-4 mr-2" />
-                        Show QR Code
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handleRestartSession(session.id)}>
-                        <RotateCcw className="h-4 w-4 mr-2" />
-                        Restart Session
-                      </DropdownMenuItem>
-                      <DropdownMenuItem 
-                        onClick={() => handleDeleteSession(session.id)}
-                        className="text-destructive"
-                      >
-                        <Trash2 className="h-4 w-4 mr-2" />
-                        Delete Session
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-                
-                <div className="flex items-center gap-2">
-                  <Badge className={getStatusColor(session.status)}>
-                    {getStatusIcon(session.status)}
-                    <span className="ml-1 capitalize">{session.status.replace('_', ' ')}</span>
-                  </Badge>
-                </div>
-              </CardHeader>
-              
-              <CardContent className="space-y-4">
-                {session.phone && (
-                  <div>
-                    <p className="text-sm font-medium">Phone Number</p>
-                    <p className="text-sm text-muted-foreground">{session.phone}</p>
-                  </div>
-                )}
-                
-                <div className="flex justify-between items-center">
-                  <div>
-                    <p className="text-sm font-medium">Messages</p>
-                    <p className="text-sm text-muted-foreground">{session.messagesCount || 0}</p>
-                  </div>
-                  {session.lastSeen && (
-                    <div className="text-right">
-                      <p className="text-sm font-medium">Last Seen</p>
-                      <p className="text-sm text-muted-foreground">{session.lastSeen}</p>
-                    </div>
-                  )}
-                </div>
-                
-                {(session.status === 'qr' || session.status === 'connecting') && (
-                  <Button 
-                    onClick={() => showQrCode(session)}
-                    variant="outline" 
-                    className="w-full"
-                  >
-                    <QrCode className="mr-2 h-4 w-4" />
-                    Show QR Code
-                  </Button>
-                )}
-              </CardContent>
-            </Card>
-          ))
-        )}
-      </div>
+      {isLoading ? (
+        <div className="flex items-center justify-center h-64">
+          <Loader2 className="h-8 w-8 animate-spin" />
+        </div>
+      ) : sessions.length === 0 ? (
+        <Card className="p-8 text-center">
+          <div className="flex flex-col items-center gap-4">
+            <Smartphone className="h-12 w-12 text-muted-foreground" />
+            <div>
+              <h3 className="text-lg font-semibold">No sessions yet</h3>
+              <p className="text-muted-foreground">Create your first WhatsApp session to get started</p>
+            </div>
+            <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+              <DialogTrigger asChild>
+                <Button className="gap-2">
+                  <Plus className="h-4 w-4" />
+                  Create First Session
+                </Button>
+              </DialogTrigger>
+            </Dialog>
+          </div>
+        </Card>
+      ) : (
+        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+          {sessions.map((session) => (
+            <SessionCard
+              key={session.id}
+              session={session}
+              onShowQR={showQrCode}
+              onRestart={handleRestartSession}
+              onDelete={handleDeleteSession}
+            />
+          ))}
+        </div>
+      )}
 
       {/* QR Code Dialog */}
       <Dialog open={isQrDialogOpen} onOpenChange={setIsQrDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>WhatsApp QR Code</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              <QrCode className="h-5 w-5" />
+              WhatsApp QR Code
+            </DialogTitle>
             <DialogDescription>
-              Scan this QR code with your WhatsApp mobile app to connect the session "{selectedSession?.name}".
+              Scan this QR code with WhatsApp on your phone to connect the session: {selectedSession?.name}
             </DialogDescription>
           </DialogHeader>
           
-          <div className="flex items-center justify-center p-6 bg-muted rounded-lg">
-            {selectedSession?.qrCode ? (
-              <div className="text-center">
-                <img 
-                  src={selectedSession.qrCode} 
-                  alt="WhatsApp QR Code" 
-                  className="max-w-full h-auto mx-auto mb-2"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Scan with WhatsApp mobile app
-                </p>
-              </div>
+          <div className="flex justify-center p-6">
+            {qrCode ? (
+              <img 
+                src={qrCode} 
+                alt="WhatsApp QR Code" 
+                className="max-w-full h-auto rounded-lg border"
+              />
             ) : (
-              <div className="text-center">
-                <QrCode className="h-16 w-16 text-muted-foreground mx-auto mb-2" />
-                <p className="text-sm text-muted-foreground">QR Code not available</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  The session might already be connected or there was an error generating the code.
-                </p>
+              <div className="flex items-center justify-center w-64 h-64 border-2 border-dashed border-gray-300 rounded-lg">
+                <div className="text-center">
+                  <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">Loading QR code...</p>
+                </div>
               </div>
             )}
           </div>
+          
+          <DialogFooter>
+            <Button 
+              variant="outline" 
+              onClick={() => selectedSession && showQrCode(selectedSession)}
+            >
+              Refresh QR Code
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
   );
 }
-
-export default Sessions;

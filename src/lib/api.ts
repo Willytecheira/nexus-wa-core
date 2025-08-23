@@ -27,14 +27,21 @@ interface LoginResponse {
   };
 }
 
-interface Session {
+export interface Session {
   id: string;
   name: string;
-  phone?: string;
-  status: 'disconnected' | 'connecting' | 'connected' | 'qr' | 'error';
-  lastSeen?: string;
-  messagesCount?: number;
-  qrCode?: string;
+  status: 'connecting' | 'qr' | 'authenticated' | 'ready' | 'disconnected';
+  phone_number?: string;
+  created_at: string;
+  messages_count?: number;
+  connected_at?: string;
+  last_activity?: string;
+  messages_sent?: number;
+  messages_received?: number;
+  connection_time?: number;
+  error_count?: number;
+  current_uptime_seconds?: number;
+  seconds_since_last_activity?: number;
 }
 
 class ApiClient {
@@ -151,6 +158,14 @@ class ApiClient {
     return this.request<{ qr: string }>(`/api/sessions/${sessionId}/qr`);
   }
 
+  async getSessionMetrics(sessionId: string): Promise<ApiResponse<Session>> {
+    return this.request<Session>(`/api/sessions/${sessionId}/metrics`);
+  }
+
+  async getSessionsMetrics(): Promise<ApiResponse<Session[]>> {
+    return this.request<Session[]>('/api/sessions/metrics');
+  }
+
   async getMetrics(): Promise<ApiResponse<any>> {
     return this.request('/api/metrics');
   }
@@ -217,4 +232,4 @@ class ApiClient {
 }
 
 export const apiClient = new ApiClient(config.apiUrl);
-export type { LoginRequest, LoginResponse, ApiResponse, Session };
+export type { LoginRequest, LoginResponse, ApiResponse };

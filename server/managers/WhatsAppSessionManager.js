@@ -88,6 +88,7 @@ class WhatsAppSessionManager {
 
         // Generate base64 QR code for immediate display
         const qrBase64 = await QRCode.toDataURL(qr);
+        console.log(`[${sessionId}] QR Code generated - Length: ${qrBase64.length}, Starts with: ${qrBase64.substring(0, 50)}...`);
 
         session.status = 'qr_received';
         session.qrCode = qrBase64;
@@ -99,6 +100,7 @@ class WhatsAppSessionManager {
           qrCode: qrBase64,
           status: 'qr_received'
         });
+        console.log(`[${sessionId}] QR Code emitted to clients`);
 
         logger.info(`QR code generated for session ${sessionId}`);
       } catch (error) {

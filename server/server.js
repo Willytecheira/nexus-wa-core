@@ -195,6 +195,11 @@ app.get('/api/sessions/:sessionId/qr', AuthMiddleware, async (req, res) => {
     const { sessionId } = req.params;
     let qrCode = await sessionManager.getQRCode(sessionId);
     
+    console.log(`[API] QR Code request for session ${sessionId} - Found: ${!!qrCode}`);
+    if (qrCode) {
+      console.log(`[API] QR Code - Length: ${qrCode.length}, Starts with: ${qrCode.substring(0, 50)}...`);
+    }
+    
     // If QR code is not available, try to restart the session to generate a new one
     if (!qrCode) {
       const session = sessionManager.getSession(sessionId);
@@ -206,6 +211,10 @@ app.get('/api/sessions/:sessionId/qr', AuthMiddleware, async (req, res) => {
         // Wait a moment for the QR to be generated
         await new Promise(resolve => setTimeout(resolve, 2000));
         qrCode = await sessionManager.getQRCode(sessionId);
+        console.log(`[API] After restart - QR Code found: ${!!qrCode}`);
+        if (qrCode) {
+          console.log(`[API] After restart - QR Code - Length: ${qrCode.length}, Starts with: ${qrCode.substring(0, 50)}...`);
+        }
       }
       
       if (!qrCode) {

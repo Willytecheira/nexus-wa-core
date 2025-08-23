@@ -448,7 +448,7 @@ export function Sessions() {
             {selectedSession?.qrCode ? (
               <div className="text-center">
                 <img 
-                  src={`data:image/png;base64,${selectedSession.qrCode}`} 
+                  src={selectedSession.qrCode} 
                   alt="WhatsApp QR Code" 
                   className="max-w-full h-auto mx-auto mb-2"
                 />

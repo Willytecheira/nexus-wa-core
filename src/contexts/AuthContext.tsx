@@ -1,3 +1,4 @@
+
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { apiClient, type LoginResponse } from '@/lib/api';
@@ -108,10 +109,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return false;
       }
 
-      // Update user with current timestamp
+      // Update user with current timestamp and default status
       const updatedUser: User = {
         ...userData,
-        lastLogin: new Date().toISOString()
+        lastLogin: new Date().toISOString(),
+        status: 'active' // Add the missing status property
       };
 
       setUser(updatedUser);

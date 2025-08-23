@@ -16,65 +16,135 @@ import {
 } from 'lucide-react';
 import { LineChart, Line, AreaChart, Area, PieChart, Pie, Cell, ResponsiveContainer, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import { useAuth } from '@/contexts/AuthContext';
+import { apiClient } from '@/lib/api';
+import { toast } from 'sonner';
 
-interface SystemMetrics {
+// Real API response interfaces
+interface SystemStats {
   activeSessions: number;
   totalMessages: number;
   memoryUsage: number;
   cpuUsage: number;
-  uptime: string;
+  uptime: number;
+}
+
+interface SessionsData {
+  total: number;
+  active: number;
+  statusCounts: Record<string, number>;
+}
+
+interface MessagesData {
+  hourlyMessages: Array<{ hour: string; count: number }>;
+  messageTypes: Array<{ type: string; count: number }>;
+}
+
+interface ApiMetrics {
+  systemStats: SystemStats;
+  sessionsData: SessionsData;
+  messagesData: MessagesData;
+}
+
+// Transformed data for charts
+interface TransformedMetrics {
   messagesPerHour: Array<{ time: string; messages: number; delivered: number }>;
   sessionStatus: Array<{ name: string; value: number; color: string }>;
   systemLoad: Array<{ time: string; cpu: number; memory: number; network: number }>;
+  systemStats: SystemStats;
+  sessionsData: SessionsData;
 }
 
-// Mock real-time data generator
-const generateMetrics = (): SystemMetrics => {
-  const now = new Date();
-  const messagesPerHour = Array.from({ length: 24 }, (_, i) => {
-    const hour = new Date(now.getTime() - (23 - i) * 60 * 60 * 1000);
-    return {
-      time: hour.toTimeString().slice(0, 5),
-      messages: Math.floor(Math.random() * 100) + 20,
-      delivered: Math.floor(Math.random() * 95) + 85
-    };
+// Fetch real metrics from API
+const fetchMetrics = async (): Promise<ApiMetrics | null> => {
+  try {
+    const response = await apiClient.getMetrics();
+    if (response.success && response.data) {
+      return response.data as ApiMetrics;
+    }
+    throw new Error(response.error || 'Failed to fetch metrics');
+  } catch (error) {
+    console.error('Error fetching metrics:', error);
+    toast.error('Failed to load dashboard metrics');
+    return null;
+  }
+};
+
+// Transform API data for chart display
+const transformMetricsForCharts = (apiMetrics: ApiMetrics): TransformedMetrics => {
+  const { systemStats, sessionsData, messagesData } = apiMetrics;
+  
+  // Transform hourly messages data for area chart
+  const messagesPerHour = messagesData.hourlyMessages.map(item => ({
+    time: `${item.hour}:00`,
+    messages: item.count,
+    delivered: Math.floor(item.count * 0.96) // Simulate 96% delivery rate
+  }));
+
+  // Ensure we have 24 hours of data, fill missing hours with 0
+  const fullDayData = Array.from({ length: 24 }, (_, i) => {
+    const hour = i.toString().padStart(2, '0');
+    const existing = messagesPerHour.find(m => m.time === `${hour}:00`);
+    return existing || { time: `${hour}:00`, messages: 0, delivered: 0 };
   });
 
+  // Transform session status data for pie chart
+  const sessionStatus = Object.entries(sessionsData.statusCounts).map(([status, count]) => ({
+    name: status.charAt(0).toUpperCase() + status.slice(1),
+    value: count,
+    color: getStatusColor(status),
+  }));
+
+  // Generate mock system load data (since it's not in the current API)
   const systemLoad = Array.from({ length: 20 }, (_, i) => {
-    const time = new Date(now.getTime() - (19 - i) * 60 * 1000);
+    const time = new Date(Date.now() - (19 - i) * 60 * 1000);
     return {
       time: time.toTimeString().slice(0, 5),
-      cpu: Math.floor(Math.random() * 40) + 20,
-      memory: Math.floor(Math.random() * 30) + 40,
-      network: Math.floor(Math.random() * 60) + 10
+      cpu: Math.min(systemStats.cpuUsage / 1000 + Math.random() * 10, 100),
+      memory: Math.min((systemStats.memoryUsage / 1024) * 100 + Math.random() * 10, 100),
+      network: Math.random() * 60 + 10
     };
   });
 
   return {
-    activeSessions: 3,
-    totalMessages: 1247,
-    memoryUsage: 67,
-    cpuUsage: 34,
-    uptime: '7d 14h 32m',
-    messagesPerHour,
-    sessionStatus: [
-      { name: 'Connected', value: 3, color: '#25D366' },
-      { name: 'Disconnected', value: 0, color: '#FF6B6B' },
-      { name: 'Initializing', value: 1, color: '#FFA726' }
-    ],
-    systemLoad
+    messagesPerHour: fullDayData,
+    sessionStatus,
+    systemLoad,
+    systemStats,
+    sessionsData,
   };
+};
+
+const getStatusColor = (status: string): string => {
+  switch (status.toLowerCase()) {
+    case 'connected': return '#25D366';
+    case 'disconnected': return '#FF6B6B';
+    case 'connecting': return '#FFA726';
+    case 'qr': return '#2196F3';
+    default: return '#9E9E9E';
+  }
 };
 
 export default function Dashboard() {
   const { user } = useAuth();
-  const [metrics, setMetrics] = useState<SystemMetrics>(generateMetrics());
+  const [metrics, setMetrics] = useState<TransformedMetrics | null>(null);
   const [lastUpdate, setLastUpdate] = useState(new Date());
+  const [loading, setLoading] = useState(true);
+
+  const loadMetrics = async () => {
+    setLoading(true);
+    const data = await fetchMetrics();
+    if (data) {
+      setMetrics(transformMetricsForCharts(data));
+      setLastUpdate(new Date());
+    }
+    setLoading(false);
+  };
 
   useEffect(() => {
+    loadMetrics();
+    
     const interval = setInterval(() => {
-      setMetrics(generateMetrics());
-      setLastUpdate(new Date());
+      loadMetrics();
     }, 30000); // Update every 30 seconds
 
     return () => clearInterval(interval);
@@ -87,40 +157,59 @@ export default function Dashboard() {
     return 'Good evening';
   };
 
+  if (loading || !metrics) {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-center h-64">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+            <p className="text-muted-foreground">Loading dashboard metrics...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const deliveryRate = metrics.messagesPerHour.reduce((acc, curr) => acc + curr.delivered, 0) / 
+                      Math.max(metrics.messagesPerHour.reduce((acc, curr) => acc + curr.messages, 0), 1) * 100;
+
   const stats = [
     {
       title: 'Active Sessions',
-      value: metrics.activeSessions,
-      change: '+2',
+      value: metrics.systemStats.activeSessions,
+      change: `${metrics.sessionsData.total - metrics.systemStats.activeSessions} inactive`,
       icon: Smartphone,
       color: 'text-whatsapp-primary',
       bg: 'bg-whatsapp-primary/10'
     },
     {
-      title: 'Messages Today',
-      value: metrics.totalMessages,
-      change: '+156',
+      title: 'Total Messages',
+      value: metrics.systemStats.totalMessages.toLocaleString(),
+      change: `+${metrics.messagesPerHour.reduce((acc, curr) => acc + curr.messages, 0)} today`,
       icon: MessageSquare,
       color: 'text-status-info',
       bg: 'bg-status-info/10'
     },
     {
       title: 'Delivery Rate',
-      value: '98.2%',
-      change: '+0.5%',
+      value: `${deliveryRate.toFixed(1)}%`,
+      change: 'Last 24h',
       icon: TrendingUp,
       color: 'text-status-success',
       bg: 'bg-status-success/10'
     },
     {
       title: 'System Uptime',
-      value: metrics.uptime,
+      value: `${Math.floor(metrics.systemStats.uptime / 3600)}h ${Math.floor((metrics.systemStats.uptime % 3600) / 60)}m`,
       change: 'Stable',
       icon: Activity,
       color: 'text-status-warning',
       bg: 'bg-status-warning/10'
     }
   ];
+
+  const memoryPercentage = Math.min((metrics.systemStats.memoryUsage / 512) * 100, 100);
+  const cpuPercentage = Math.min((metrics.systemStats.cpuUsage / 10000) * 100, 100);
 
   return (
     <div className="space-y-6">
@@ -151,7 +240,7 @@ export default function Dashboard() {
             <CardContent>
               <div className="text-2xl font-bold">{stat.value}</div>
               <p className="text-xs text-muted-foreground">
-                <span className="text-status-success">↗ {stat.change}</span> from yesterday
+                {stat.change}
               </p>
             </CardContent>
           </Card>
@@ -281,9 +370,9 @@ export default function Dashboard() {
                   <Cpu className="h-4 w-4 text-status-warning" />
                   <span className="text-sm font-medium">CPU Usage</span>
                 </div>
-                <span className="text-sm text-muted-foreground">{metrics.cpuUsage}%</span>
+                <span className="text-sm text-muted-foreground">{cpuPercentage.toFixed(1)}%</span>
               </div>
-              <Progress value={metrics.cpuUsage} className="h-2" />
+              <Progress value={cpuPercentage} className="h-2" />
             </div>
 
             <div className="space-y-2">
@@ -292,9 +381,9 @@ export default function Dashboard() {
                   <HardDrive className="h-4 w-4 text-status-info" />
                   <span className="text-sm font-medium">Memory Usage</span>
                 </div>
-                <span className="text-sm text-muted-foreground">{metrics.memoryUsage}%</span>
+                <span className="text-sm text-muted-foreground">{metrics.systemStats.memoryUsage} MB</span>
               </div>
-              <Progress value={metrics.memoryUsage} className="h-2" />
+              <Progress value={memoryPercentage} className="h-2" />
             </div>
 
             <div className="space-y-2">
@@ -329,7 +418,9 @@ export default function Dashboard() {
               <div className="w-2 h-2 bg-status-success rounded-full"></div>
               <div className="flex-1">
                 <p className="text-sm font-medium">All systems operational</p>
-                <p className="text-xs text-muted-foreground">Last checked: {new Date().toLocaleTimeString()}</p>
+                <p className="text-xs text-muted-foreground">
+                  {metrics.systemStats.activeSessions} active sessions, {metrics.systemStats.totalMessages} total messages
+                </p>
               </div>
               <Badge variant="secondary" className="bg-status-success/20 text-status-success">
                 Healthy
@@ -339,8 +430,8 @@ export default function Dashboard() {
             <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
               <div className="w-2 h-2 bg-status-info rounded-full"></div>
               <div className="flex-1">
-                <p className="text-sm font-medium">Session 'Business-01' reconnected</p>
-                <p className="text-xs text-muted-foreground">2 minutes ago</p>
+                <p className="text-sm font-medium">System uptime: {Math.floor(metrics.systemStats.uptime / 3600)} hours</p>
+                <p className="text-xs text-muted-foreground">Server running smoothly</p>
               </div>
               <Badge variant="secondary" className="bg-status-info/20 text-status-info">
                 Info

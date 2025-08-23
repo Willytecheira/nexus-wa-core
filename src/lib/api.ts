@@ -151,6 +151,47 @@ class ApiClient {
     return this.request<{ qr: string }>(`/api/sessions/${sessionId}/qr`);
   }
 
+  async getMetrics(): Promise<ApiResponse<any>> {
+    return this.request('/api/metrics');
+  }
+
+  // Message Methods
+  async sendMessage(messageData: { sessionId: string; phone: string; message: string; type: string }): Promise<ApiResponse> {
+    return this.request('/api/messages/send', {
+      method: 'POST',
+      body: JSON.stringify(messageData),
+    });
+  }
+
+  async getMessages(page = 1, limit = 20): Promise<ApiResponse> {
+    return this.request(`/api/messages?page=${page}&limit=${limit}`);
+  }
+
+  // User Management Methods
+  async getUsers(): Promise<ApiResponse> {
+    return this.request('/api/users');
+  }
+
+  async createUser(userData: any): Promise<ApiResponse> {
+    return this.request('/api/users', {
+      method: 'POST',
+      body: JSON.stringify(userData),
+    });
+  }
+
+  async updateUser(userId: string, userData: any): Promise<ApiResponse> {
+    return this.request(`/api/users/${userId}`, {
+      method: 'PUT',
+      body: JSON.stringify(userData),
+    });
+  }
+
+  async deleteUser(userId: string): Promise<ApiResponse> {
+    return this.request(`/api/users/${userId}`, {
+      method: 'DELETE',
+    });
+  }
+
   setToken(token: string) {
     this.token = token;
   }

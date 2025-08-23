@@ -1,127 +1,113 @@
-// API configuration and utilities
-import { logger } from './logger';
 import { config } from './config';
 
-logger.info('API initialized', { baseUrl: config.apiUrl });
-
-interface ApiResponse<T = any> {
-  success?: boolean;
+// Define request/response interfaces
+export interface ApiResponse<T = any> {
+  success: boolean;
   data?: T;
   message?: string;
   error?: string;
 }
 
-interface LoginRequest {
+export interface LoginRequest {
   username: string;
   password: string;
 }
 
-interface LoginResponse {
+export interface LoginResponse {
   token: string;
   user: {
     id: string;
     username: string;
-    role: 'admin' | 'operator' | 'viewer';
-    lastLogin: string;
-    status: 'active' | 'inactive';
+    role: string;
   };
 }
 
 export interface Session {
   id: string;
   name: string;
-  status: 'connecting' | 'qr' | 'authenticated' | 'ready' | 'disconnected';
+  status: string;
+  connected: boolean;
+  phoneNumber?: string;
   phone_number?: string;
-  created_at: string;
-  messages_count?: number;
-  connected_at?: string;
-  last_activity?: string;
+  createdAt: string;
+  lastActivity?: string;
+  userId: string;
+  webhook_url?: string;
   messages_sent?: number;
   messages_received?: number;
-  connection_time?: number;
-  error_count?: number;
   current_uptime_seconds?: number;
   seconds_since_last_activity?: number;
+  error_count?: number;
 }
 
 class ApiClient {
-  private baseURL: string;
   private token: string | null = null;
+  private baseUrl: string;
 
-  constructor(baseURL: string) {
-    this.baseURL = baseURL;
-    this.token = localStorage.getItem(config.tokenStorageKey) || sessionStorage.getItem(config.tokenStorageKey);
+  constructor(baseUrl: string) {
+    this.baseUrl = baseUrl;
+    // Try to restore token from storage
+    this.token = localStorage.getItem(config.tokenStorageKey) || 
+                 sessionStorage.getItem(config.tokenStorageKey);
   }
 
-  private async request<T>(
-    endpoint: string, 
-    options: RequestInit = {}
-  ): Promise<ApiResponse<T>> {
-    const url = `${this.baseURL}${endpoint}`;
+  private async request<T = any>(endpoint: string, options: RequestInit = {}): Promise<ApiResponse<T>> {
+    const url = `${this.baseUrl}/api${endpoint}`;
     
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      ...(options.headers as Record<string, string> || {}),
     };
 
-    if (this.token) {
-      headers['Authorization'] = `Bearer ${this.token}`;
+    if (options.headers) {
+      Object.assign(headers, options.headers);
     }
 
-    logger.debug('Making API request', { url, method: options.method || 'GET' });
+    if (this.token) {
+      headers.Authorization = `Bearer ${this.token}`;
+    }
 
     try {
       const response = await fetch(url, {
         ...options,
         headers,
-        signal: AbortSignal.timeout(config.requestTimeout),
+        credentials: 'include',
       });
 
-      const contentType = response.headers.get('content-type');
-      let data: any;
-
-      if (contentType && contentType.includes('application/json')) {
-        data = await response.json();
-      } else {
-        data = await response.text();
-      }
-
-      logger.debug('API response received', { status: response.status, url });
+      const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(
-          typeof data === 'object' && data.error 
-            ? data.error 
-            : `HTTP ${response.status}: ${response.statusText}`
-        );
+        throw new Error(data.message || data.error || `HTTP ${response.status}`);
       }
 
-      return { success: true, data };
+      return data;
     } catch (error) {
-      logger.error('API request failed', { url, error: error instanceof Error ? error.message : 'Network error' });
-      const errorMessage = error instanceof Error ? error.message : 'Network error';
-      return { success: false, error: errorMessage };
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error('Network error occurred');
     }
   }
 
+  // Authentication Methods
   async login(credentials: LoginRequest): Promise<ApiResponse<LoginResponse>> {
-    const response = await this.request<LoginResponse>('/api/auth/login', {
+    const response = await this.request<LoginResponse>('/auth/login', {
       method: 'POST',
       body: JSON.stringify(credentials),
     });
 
     if (response.success && response.data?.token) {
-      this.setToken(response.data.token);
+      this.token = response.data.token;
+      localStorage.setItem(config.tokenStorageKey, this.token);
     }
 
     return response;
   }
 
   async logout(): Promise<ApiResponse> {
-    const response = await this.request('/api/auth/logout', {
+    const response = await this.request('/auth/logout', {
       method: 'POST',
     });
-    
+
     this.clearToken();
     return response;
   }
@@ -130,49 +116,49 @@ class ApiClient {
     return this.request('/health');
   }
 
-  // Session Management Methods
+  // Session Methods
   async getSessions(): Promise<ApiResponse<Session[]>> {
-    return this.request<Session[]>('/api/sessions');
+    return this.request('/sessions');
   }
 
   async createSession(name: string): Promise<ApiResponse<Session>> {
-    return this.request<Session>('/api/sessions', {
+    return this.request('/sessions', {
       method: 'POST',
       body: JSON.stringify({ name }),
     });
   }
 
   async deleteSession(sessionId: string): Promise<ApiResponse> {
-    return this.request(`/api/sessions/${sessionId}`, {
+    return this.request(`/sessions/${sessionId}`, {
       method: 'DELETE',
     });
   }
 
   async restartSession(sessionId: string): Promise<ApiResponse> {
-    return this.request(`/api/sessions/${sessionId}/restart`, {
+    return this.request(`/sessions/${sessionId}/restart`, {
       method: 'POST',
     });
   }
 
-  async getQRCode(sessionId: string): Promise<ApiResponse<{ qr: string }>> {
-    return this.request<{ qr: string }>(`/api/sessions/${sessionId}/qr`);
+  async getQRCode(sessionId: string): Promise<ApiResponse<{ qr: string; qrCode: string }>> {
+    return this.request(`/sessions/${sessionId}/qr`);
   }
 
-  async getSessionMetrics(sessionId: string): Promise<ApiResponse<Session>> {
-    return this.request<Session>(`/api/sessions/${sessionId}/metrics`);
+  async getSessionMetrics(sessionId: string): Promise<ApiResponse> {
+    return this.request(`/sessions/${sessionId}/metrics`);
   }
 
-  async getSessionsMetrics(): Promise<ApiResponse<Session[]>> {
-    return this.request<Session[]>('/api/sessions/metrics');
+  async getSessionsMetrics(): Promise<ApiResponse> {
+    return this.request('/sessions/metrics');
   }
 
-  async getMetrics(): Promise<ApiResponse<any>> {
-    return this.request('/api/metrics');
+  async getMetrics(): Promise<ApiResponse> {
+    return this.request('/metrics');
   }
 
   // Message Methods
   async sendMessage(messageData: { sessionId: string; phone: string; message: string; type: string }): Promise<ApiResponse> {
-    return this.request('/api/messages/send', {
+    return this.request('/messages/send', {
       method: 'POST',
       body: JSON.stringify(messageData),
     });
@@ -188,30 +174,67 @@ class ApiClient {
       params.append('sessionId', sessionId);
     }
     
-    return this.request(`/api/messages?${params.toString()}`);
+    return this.request(`/messages?${params.toString()}`);
+  }
+
+  // Webhook management
+  async configureWebhook(sessionId: string, webhookUrl: string, eventTypes?: string[]): Promise<ApiResponse> {
+    return this.request('/webhooks/configure', {
+      method: 'POST',
+      body: JSON.stringify({
+        sessionId,
+        webhookUrl,
+        eventTypes
+      })
+    });
+  }
+
+  async getSessionWebhook(sessionId: string): Promise<ApiResponse<any>> {
+    return this.request(`/webhooks/${sessionId}`);
+  }
+
+  async removeWebhook(sessionId: string): Promise<ApiResponse> {
+    return this.request(`/webhooks/${sessionId}`, {
+      method: 'DELETE'
+    });
+  }
+
+  async getWebhookEvents(sessionId: string, limit = 50, offset = 0): Promise<ApiResponse<any[]>> {
+    const params = new URLSearchParams({
+      limit: limit.toString(),
+      offset: offset.toString()
+    });
+    
+    return this.request(`/webhooks/events/${sessionId}?${params.toString()}`);
+  }
+
+  async testWebhook(sessionId: string): Promise<ApiResponse> {
+    return this.request(`/webhooks/test/${sessionId}`, {
+      method: 'POST'
+    });
   }
 
   // User Management Methods
   async getUsers(): Promise<ApiResponse> {
-    return this.request('/api/users');
+    return this.request('/users');
   }
 
   async createUser(userData: any): Promise<ApiResponse> {
-    return this.request('/api/users', {
+    return this.request('/users', {
       method: 'POST',
       body: JSON.stringify(userData),
     });
   }
 
   async updateUser(userId: string, userData: any): Promise<ApiResponse> {
-    return this.request(`/api/users/${userId}`, {
+    return this.request(`/users/${userId}`, {
       method: 'PUT',
       body: JSON.stringify(userData),
     });
   }
 
   async deleteUser(userId: string): Promise<ApiResponse> {
-    return this.request(`/api/users/${userId}`, {
+    return this.request(`/users/${userId}`, {
       method: 'DELETE',
     });
   }
@@ -232,4 +255,3 @@ class ApiClient {
 }
 
 export const apiClient = new ApiClient(config.apiUrl);
-export type { LoginRequest, LoginResponse, ApiResponse };

@@ -52,6 +52,7 @@ class DatabaseManager {
         name TEXT NOT NULL,
         status TEXT NOT NULL CHECK (status IN ('connecting', 'qr', 'authenticated', 'ready', 'disconnected')),
         phone_number TEXT,
+        webhook_url TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         connected_at DATETIME,
@@ -61,6 +62,20 @@ class DatabaseManager {
         connection_time INTEGER DEFAULT 0,
         error_count INTEGER DEFAULT 0,
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL
+      )`,
+
+      // Webhook events table
+      `CREATE TABLE IF NOT EXISTS webhook_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        webhook_url TEXT,
+        payload TEXT,
+        response_status INTEGER,
+        response_body TEXT,
+        retry_count INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (session_id) REFERENCES sessions (id) ON DELETE CASCADE
       )`,
 
       // Messages table
@@ -329,6 +344,49 @@ class DatabaseManager {
 
   async getAllSessions() {
     return this.all('SELECT * FROM sessions ORDER BY created_at DESC');
+  }
+
+  // Webhook management methods
+  async updateSessionWebhook(sessionId, webhookUrl, eventTypes = []) {
+    const query = `UPDATE sessions SET webhook_url = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`;
+    return this.run(query, [webhookUrl, sessionId]);
+  }
+
+  async getSessionWebhook(sessionId) {
+    const query = `SELECT webhook_url, id, name FROM sessions WHERE id = ?`;
+    return this.get(query, [sessionId]);
+  }
+
+  async removeSessionWebhook(sessionId) {
+    const query = `UPDATE sessions SET webhook_url = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?`;
+    return this.run(query, [sessionId]);
+  }
+
+  async logWebhookEvent(sessionId, eventType, webhookUrl, payload, responseStatus, responseBody, retryCount = 0) {
+    const query = `
+      INSERT INTO webhook_events (session_id, event_type, webhook_url, payload, response_status, response_body, retry_count)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `;
+    return this.run(query, [sessionId, eventType, webhookUrl, JSON.stringify(payload), responseStatus, responseBody, retryCount]);
+  }
+
+  async getWebhookEvents(sessionId, limit = 50, offset = 0) {
+    const query = `
+      SELECT 
+        id,
+        event_type,
+        webhook_url,
+        payload,
+        response_status,
+        response_body,
+        retry_count,
+        created_at
+      FROM webhook_events 
+      WHERE session_id = ? 
+      ORDER BY created_at DESC 
+      LIMIT ? OFFSET ?
+    `;
+    return this.all(query, [sessionId, limit, offset]);
   }
 
   // Message management methods

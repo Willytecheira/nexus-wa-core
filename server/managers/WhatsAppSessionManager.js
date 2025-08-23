@@ -377,6 +377,96 @@ class WhatsAppSessionManager {
       }
     }
   }
+
+  // Webhook functionality
+  async sendWebhook(sessionId, eventType, payload) {
+    try {
+      const dbManager = require('./DatabaseManager');
+      const db = new dbManager();
+      await db.initialize();
+
+      // Get webhook URL from database
+      const webhookConfig = await db.getSessionWebhook(sessionId);
+      if (!webhookConfig || !webhookConfig.webhook_url) {
+        return false;
+      }
+
+      const webhookPayload = {
+        event: eventType,
+        sessionId: sessionId,
+        sessionName: webhookConfig.name,
+        timestamp: new Date().toISOString(),
+        data: payload
+      };
+
+      // Send webhook with retry logic
+      const maxRetries = 3;
+      let success = false;
+      let lastError = null;
+
+      for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+          const fetch = (await import('node-fetch')).default;
+          const response = await fetch(webhookConfig.webhook_url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'User-Agent': 'WhatsApp-API-Webhook/1.0'
+            },
+            body: JSON.stringify(webhookPayload),
+            timeout: 10000
+          });
+
+          // Log webhook event
+          await db.logWebhookEvent(
+            sessionId,
+            eventType,
+            webhookConfig.webhook_url,
+            webhookPayload,
+            response.status,
+            response.status < 400 ? 'success' : await response.text(),
+            attempt
+          );
+
+          if (response.ok) {
+            success = true;
+            break;
+          } else {
+            lastError = `HTTP ${response.status}`;
+          }
+        } catch (error) {
+          lastError = error.message;
+          logger.warn(`Webhook attempt ${attempt + 1} failed for session ${sessionId}:`, error.message);
+          
+          // Log failed attempt
+          await db.logWebhookEvent(
+            sessionId,
+            eventType,
+            webhookConfig.webhook_url,
+            webhookPayload,
+            0,
+            error.message,
+            attempt
+          );
+        }
+
+        // Wait before retry (exponential backoff)
+        if (attempt < maxRetries - 1) {
+          await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
+        }
+      }
+
+      if (!success) {
+        logger.error(`All webhook attempts failed for session ${sessionId}. Last error: ${lastError}`);
+      }
+
+      await db.close();
+      return success;
+    } catch (error) {
+      logger.error(`Error sending webhook for session ${sessionId}:`, error);
+      return false;
+    }
+  }
 }
 
 module.exports = WhatsAppSessionManager;

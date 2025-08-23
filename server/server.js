@@ -426,6 +426,146 @@ app.get('/api/sessions/:id/metrics', AuthMiddleware, async (req, res) => {
   }
 });
 
+// Webhook endpoints
+app.post('/api/webhooks/configure', AuthMiddleware, async (req, res) => {
+  try {
+    const { sessionId, webhookUrl, eventTypes } = req.body;
+    
+    if (!sessionId || !webhookUrl) {
+      return res.status(400).json({
+        success: false,
+        message: 'Session ID and webhook URL are required'
+      });
+    }
+
+    // Validate URL format
+    try {
+      new URL(webhookUrl);
+    } catch (error) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid webhook URL format'
+      });
+    }
+
+    // Update session with webhook URL
+    await db.updateSessionWebhook(sessionId, webhookUrl, eventTypes || []);
+    
+    res.json({
+      success: true,
+      message: 'Webhook configured successfully'
+    });
+  } catch (error) {
+    logger.error('Error configuring webhook:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to configure webhook'
+    });
+  }
+});
+
+app.get('/api/webhooks/:sessionId', AuthMiddleware, async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const webhook = await db.getSessionWebhook(sessionId);
+    
+    res.json({
+      success: true,
+      data: webhook
+    });
+  } catch (error) {
+    logger.error('Error getting webhook:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get webhook configuration'
+    });
+  }
+});
+
+app.delete('/api/webhooks/:sessionId', AuthMiddleware, async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    await db.removeSessionWebhook(sessionId);
+    
+    res.json({
+      success: true,
+      message: 'Webhook removed successfully'
+    });
+  } catch (error) {
+    logger.error('Error removing webhook:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to remove webhook'
+    });
+  }
+});
+
+app.get('/api/webhooks/events/:sessionId', AuthMiddleware, async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { limit = 50, offset = 0 } = req.query;
+    
+    const events = await db.getWebhookEvents(sessionId, parseInt(limit), parseInt(offset));
+    
+    res.json({
+      success: true,
+      data: events
+    });
+  } catch (error) {
+    logger.error('Error getting webhook events:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get webhook events'
+    });
+  }
+});
+
+app.post('/api/webhooks/test/:sessionId', AuthMiddleware, async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const session = sessionManager.getSession(sessionId);
+    
+    if (!session) {
+      return res.status(404).json({
+        success: false,
+        message: 'Session not found'
+      });
+    }
+
+    // Get webhook URL from database
+    const webhook = await db.getSessionWebhook(sessionId);
+    if (!webhook || !webhook.webhook_url) {
+      return res.status(400).json({
+        success: false,
+        message: 'No webhook configured for this session'
+      });
+    }
+
+    // Send test webhook
+    const testPayload = {
+      event: 'webhook.test',
+      sessionId: sessionId,
+      timestamp: new Date().toISOString(),
+      data: {
+        message: 'This is a test webhook from WhatsApp API'
+      }
+    };
+
+    const success = await sessionManager.sendWebhook(sessionId, 'webhook.test', testPayload);
+    
+    res.json({
+      success: success,
+      message: success ? 'Test webhook sent successfully' : 'Failed to send test webhook'
+    });
+  } catch (error) {
+    logger.error('Error sending test webhook:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to send test webhook'
+    });
+  }
+});
+
 // Socket.IO connection handling
 io.on('connection', (socket) => {
   logger.info(`Client connected: ${socket.id}`);

@@ -1,29 +1,34 @@
-import { useState } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea';
-import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { 
-  Send, 
-  Image, 
-  Paperclip, 
-  Search,
-  Filter,
-  CheckCircle,
-  Clock,
-  XCircle,
-  MessageSquare,
-  Phone,
-  Calendar
-} from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
+import React, { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
+import { toast } from 'sonner';
+import { apiClient, type Session } from '@/lib/api';
+import { 
+  Send, 
+  MessageSquare, 
+  Search, 
+  Filter, 
+  CheckCircle, 
+  XCircle, 
+  Clock, 
+  MessageCircle, 
+  Image, 
+  FileText, 
+  Phone,
+  Calendar,
+  Loader2
+} from 'lucide-react';
+import { format } from 'date-fns';
 
 const messageSchema = z.object({
   sessionId: z.string().min(1, 'Please select a session'),
@@ -36,84 +41,90 @@ type MessageForm = z.infer<typeof messageSchema>;
 
 interface Message {
   id: string;
-  sessionName: string;
-  phone: string;
-  message: string;
+  sessionId: string;
+  sender: string;
+  recipient: string;
+  content: string;
   type: 'text' | 'image' | 'document';
   status: 'sent' | 'delivered' | 'read' | 'failed';
   timestamp: string;
 }
 
-// Mock sessions for dropdown
-const sessions = [
-  { id: '1', name: 'Business Main', phone: '+1 (555) 123-4567' },
-  { id: '2', name: 'Support Team', phone: '+1 (555) 987-6543' },
-  { id: '3', name: 'Marketing Bot', phone: '+1 (555) 456-7890' }
-];
-
-// Mock messages
-const initialMessages: Message[] = [
-  {
-    id: '1',
-    sessionName: 'Business Main',
-    phone: '+1 (555) 555-0123',
-    message: 'Hello! Thank you for contacting us. How can we help you today?',
-    type: 'text',
-    status: 'read',
-    timestamp: '2024-01-15 14:30:00'
-  },
-  {
-    id: '2',
-    sessionName: 'Support Team',
-    phone: '+1 (555) 555-0456',
-    message: 'Your order #12345 has been shipped and will arrive tomorrow.',
-    type: 'text',
-    status: 'delivered',
-    timestamp: '2024-01-15 13:45:00'
-  },
-  {
-    id: '3',
-    sessionName: 'Marketing Bot',
-    phone: '+1 (555) 555-0789',
-    message: 'Check out our new product catalog!',
-    type: 'image',
-    status: 'sent',
-    timestamp: '2024-01-15 12:15:00'
-  }
-];
-
 export default function Messages() {
-  const [messages, setMessages] = useState<Message[]>(initialMessages);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
-  const { toast } = useToast();
+  const [loading, setLoading] = useState(true);
+  const [sendingMessage, setSendingMessage] = useState(false);
 
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-    reset,
-    setValue,
-    watch
-  } = useForm<MessageForm>({
+  const form = useForm<MessageForm>({
     resolver: zodResolver(messageSchema),
     defaultValues: {
       sessionId: '',
       phone: '',
       message: '',
-      type: 'text'
-    }
+      type: 'text',
+    },
   });
 
-  const selectedSession = watch('sessionId');
-  const messageType = watch('type');
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const [sessionsResponse, messagesResponse] = await Promise.all([
+        apiClient.getSessions(),
+        apiClient.getMessages()
+      ]);
+
+      if (sessionsResponse.success && sessionsResponse.data) {
+        setSessions(sessionsResponse.data);
+      }
+
+      if (messagesResponse.success && messagesResponse.data) {
+        setMessages(messagesResponse.data);
+      }
+    } catch (error) {
+      toast.error('Failed to load data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onSubmit = async (data: MessageForm) => {
+    setSendingMessage(true);
+    try {
+      const response = await apiClient.sendMessage({
+        sessionId: data.sessionId,
+        phone: data.phone,
+        message: data.message,
+        type: data.type,
+      });
+
+      if (response.success) {
+        toast.success('Message sent successfully!');
+        form.reset();
+        // Refresh messages to show the new one
+        loadData();
+      } else {
+        toast.error(response.error || 'Failed to send message');
+      }
+    } catch (error) {
+      toast.error('Failed to send message');
+    } finally {
+      setSendingMessage(false);
+    }
+  };
 
   const getStatusColor = (status: Message['status']) => {
     switch (status) {
-      case 'sent': return 'bg-status-info text-white';
-      case 'delivered': return 'bg-status-success text-white';
-      case 'read': return 'bg-whatsapp-primary text-white';
-      case 'failed': return 'bg-destructive text-white';
+      case 'sent': return 'bg-blue-500 text-white';
+      case 'delivered': return 'bg-green-500 text-white';
+      case 'read': return 'bg-green-600 text-white';
+      case 'failed': return 'bg-red-500 text-white';
     }
   };
 
@@ -130,50 +141,14 @@ export default function Messages() {
     switch (type) {
       case 'text': return <MessageSquare className="h-4 w-4" />;
       case 'image': return <Image className="h-4 w-4" />;
-      case 'document': return <Paperclip className="h-4 w-4" />;
+      case 'document': return <FileText className="h-4 w-4" />;
     }
-  };
-
-  const onSubmit = (data: MessageForm) => {
-    const sessionName = sessions.find(s => s.id === data.sessionId)?.name || '';
-    
-    const newMessage: Message = {
-      id: Date.now().toString(),
-      sessionName,
-      phone: data.phone,
-      message: data.message,
-      type: data.type,
-      status: 'sent',
-      timestamp: new Date().toISOString().slice(0, 19).replace('T', ' ')
-    };
-
-    setMessages([newMessage, ...messages]);
-    reset();
-    
-    toast({
-      title: "Message Sent",
-      description: `Message sent to ${data.phone} via ${sessionName}`
-    });
-
-    // Simulate delivery status updates
-    setTimeout(() => {
-      setMessages(prev => prev.map(m => 
-        m.id === newMessage.id ? { ...m, status: 'delivered' } : m
-      ));
-    }, 2000);
-
-    setTimeout(() => {
-      setMessages(prev => prev.map(m => 
-        m.id === newMessage.id ? { ...m, status: 'read' } : m
-      ));
-    }, 5000);
   };
 
   const filteredMessages = messages.filter(message => {
     const matchesSearch = 
-      message.phone.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      message.message.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      message.sessionName.toLowerCase().includes(searchTerm.toLowerCase());
+      message.recipient.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      message.content.toLowerCase().includes(searchTerm.toLowerCase());
     
     const matchesStatus = statusFilter === 'all' || message.status === statusFilter;
     
@@ -206,120 +181,118 @@ export default function Messages() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="sessionId">Session</Label>
-                    <Select onValueChange={(value) => setValue('sessionId', value)}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select a session" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {sessions.map(session => (
-                          <SelectItem key={session.id} value={session.id}>
-                            <div className="flex items-center gap-2">
-                              <Phone className="h-4 w-4" />
-                              {session.name}
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {errors.sessionId && (
-                      <p className="text-sm text-destructive">{errors.sessionId.message}</p>
-                    )}
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="phone">Phone Number</Label>
-                    <Input
-                      id="phone"
-                      placeholder="+1 (555) 123-4567"
-                      {...register('phone')}
-                      className={errors.phone ? 'border-destructive' : ''}
+              <Form {...form}>
+                <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <FormField
+                      control={form.control}
+                      name="sessionId"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Session</FormLabel>
+                          <Select onValueChange={field.onChange} defaultValue={field.value}>
+                            <FormControl>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select a session" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {sessions.map((session) => (
+                                <SelectItem key={session.id} value={session.id}>
+                                  {session.name} {session.phone && `(${session.phone})`}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
                     />
-                    {errors.phone && (
-                      <p className="text-sm text-destructive">{errors.phone.message}</p>
+
+                    <FormField
+                      control={form.control}
+                      name="phone"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Phone Number</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="+1234567890"
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
+
+                  <FormField
+                    control={form.control}
+                    name="type"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Message Type</FormLabel>
+                        <Select onValueChange={field.onChange} defaultValue={field.value}>
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select message type" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="text">
+                              <div className="flex items-center gap-2">
+                                <MessageSquare className="h-4 w-4" />
+                                Text Message
+                              </div>
+                            </SelectItem>
+                            <SelectItem value="image">
+                              <div className="flex items-center gap-2">
+                                <Image className="h-4 w-4" />
+                                Image
+                              </div>
+                            </SelectItem>
+                            <SelectItem value="document">
+                              <div className="flex items-center gap-2">
+                                <FileText className="h-4 w-4" />
+                                Document
+                              </div>
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
                     )}
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="type">Message Type</Label>
-                  <Select onValueChange={(value) => setValue('type', value as 'text' | 'image' | 'document')}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select message type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="text">
-                        <div className="flex items-center gap-2">
-                          <MessageSquare className="h-4 w-4" />
-                          Text Message
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="image">
-                        <div className="flex items-center gap-2">
-                          <Image className="h-4 w-4" />
-                          Image
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="document">
-                        <div className="flex items-center gap-2">
-                          <Paperclip className="h-4 w-4" />
-                          Document
-                        </div>
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="message">Message</Label>
-                  <Textarea
-                    id="message"
-                    placeholder={
-                      messageType === 'text' 
-                        ? "Type your message here..." 
-                        : "Caption or description (optional)"
-                    }
-                    rows={4}
-                    {...register('message')}
-                    className={errors.message ? 'border-destructive' : ''}
                   />
-                  {errors.message && (
-                    <p className="text-sm text-destructive">{errors.message.message}</p>
-                  )}
-                </div>
 
-                {messageType !== 'text' && (
-                  <div className="space-y-2">
-                    <Label>File Upload</Label>
-                    <div className="border-2 border-dashed border-muted rounded-lg p-6 text-center">
-                      <div className="flex flex-col items-center gap-2">
-                        {messageType === 'image' ? (
-                          <Image className="h-8 w-8 text-muted-foreground" />
-                        ) : (
-                          <Paperclip className="h-8 w-8 text-muted-foreground" />
-                        )}
-                        <p className="text-sm text-muted-foreground">
-                          Click to upload {messageType === 'image' ? 'image' : 'document'}
-                        </p>
-                        <Button type="button" variant="outline" size="sm">
-                          Choose File
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                )}
+                  <FormField
+                    control={form.control}
+                    name="message"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Message</FormLabel>
+                        <FormControl>
+                          <Textarea
+                            placeholder="Type your message here..."
+                            rows={4}
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
 
-                <Button 
-                  type="submit" 
-                  className="w-full bg-gradient-primary hover:bg-gradient-primary/90 shadow-whatsapp"
-                >
-                  <Send className="mr-2 h-4 w-4" />
-                  Send Message
-                </Button>
-              </form>
+                  <Button type="submit" className="w-full" disabled={sendingMessage}>
+                    {sendingMessage ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <Send className="w-4 h-4 mr-2" />
+                    )}
+                    {sendingMessage ? 'Sending...' : 'Send Message'}
+                  </Button>
+                </form>
+              </Form>
             </CardContent>
           </Card>
         </TabsContent>
@@ -340,7 +313,7 @@ export default function Messages() {
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
-                      placeholder="Search messages, phone numbers, or sessions..."
+                      placeholder="Search messages, phone numbers..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
                       className="pl-9"
@@ -363,43 +336,47 @@ export default function Messages() {
               </div>
 
               {/* Messages List */}
-              <div className="space-y-4">
-                {filteredMessages.map((message) => (
-                  <div key={message.id} className="border rounded-lg p-4 hover:bg-muted/50 transition-colors">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-2">
-                          {getTypeIcon(message.type)}
-                          <span className="font-medium">{message.sessionName}</span>
-                          <span className="text-muted-foreground">→</span>
-                          <span className="text-muted-foreground">{message.phone}</span>
-                          <Badge className={`ml-auto ${getStatusColor(message.status)}`}>
-                            {getStatusIcon(message.status)}
-                            <span className="ml-1 capitalize">{message.status}</span>
-                          </Badge>
-                        </div>
-                        <p className="text-sm mb-2">{message.message}</p>
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <Calendar className="h-3 w-3" />
-                          {new Date(message.timestamp).toLocaleString()}
+              {loading ? (
+                <div className="text-center py-8">
+                  <Loader2 className="w-8 h-8 animate-spin mx-auto mb-2" />
+                  <p className="text-muted-foreground">Loading messages...</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {filteredMessages.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <MessageSquare className="w-8 h-8 mx-auto mb-2" />
+                      <p>No messages found</p>
+                    </div>
+                  ) : (
+                    filteredMessages.map((message) => (
+                      <div key={message.id} className="border rounded-lg p-4 hover:bg-muted/50 transition-colors">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-2">
+                              {getTypeIcon(message.type)}
+                              <span className="font-medium">
+                                {sessions.find(s => s.id === message.sessionId)?.name || 'Unknown Session'}
+                              </span>
+                              <span className="text-muted-foreground">→</span>
+                              <span className="text-muted-foreground">{message.recipient}</span>
+                              <Badge className={`ml-auto ${getStatusColor(message.status)}`}>
+                                {getStatusIcon(message.status)}
+                                <span className="ml-1 capitalize">{message.status}</span>
+                              </Badge>
+                            </div>
+                            <p className="text-sm mb-2">{message.content}</p>
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                              <Calendar className="h-3 w-3" />
+                              {format(new Date(message.timestamp), 'PPpp')}
+                            </div>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  </div>
-                ))}
-
-                {filteredMessages.length === 0 && (
-                  <div className="text-center py-8">
-                    <MessageSquare className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                    <h3 className="text-lg font-semibold mb-2">No messages found</h3>
-                    <p className="text-muted-foreground">
-                      {searchTerm || statusFilter !== 'all' 
-                        ? 'Try adjusting your search or filters.' 
-                        : 'Send your first message to get started.'}
-                    </p>
-                  </div>
-                )}
-              </div>
+                    ))
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

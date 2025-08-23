@@ -163,8 +163,17 @@ class ApiClient {
     });
   }
 
-  async getMessages(page = 1, limit = 20): Promise<ApiResponse> {
-    return this.request(`/api/messages?page=${page}&limit=${limit}`);
+  async getMessages(page = 1, limit = 20, sessionId?: string): Promise<ApiResponse> {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      limit: limit.toString(),
+    });
+    
+    if (sessionId) {
+      params.append('sessionId', sessionId);
+    }
+    
+    return this.request(`/api/messages?${params.toString()}`);
   }
 
   // User Management Methods

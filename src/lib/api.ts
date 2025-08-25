@@ -79,7 +79,19 @@ class ApiClient {
         throw new Error(data.message || data.error || `HTTP ${response.status}`);
       }
 
-      return data;
+      // For login endpoint, the backend returns direct data, not wrapped
+      if (endpoint === '/auth/login' && response.ok) {
+        return {
+          success: true,
+          data: data
+        } as ApiResponse<T>;
+      }
+
+      // For other endpoints, assume they already return the correct format
+      return data.success !== undefined ? data : {
+        success: true,
+        data: data
+      } as ApiResponse<T>;
     } catch (error) {
       if (error instanceof Error) {
         throw error;

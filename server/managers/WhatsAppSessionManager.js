@@ -6,10 +6,15 @@ const { v4: uuidv4 } = require('uuid');
 const logger = require('../utils/logger');
 
 class WhatsAppSessionManager {
-  constructor(io) {
+  constructor(io, dbManager = null) {
     this.io = io;
     this.sessions = new Map();
     this.qrCodes = new Map();
+    this.db = dbManager;
+  }
+
+  setDatabaseManager(dbManager) {
+    this.db = dbManager;
   }
 
   async createSession(name, userId) {
@@ -61,6 +66,25 @@ class WhatsAppSessionManager {
 
       this.sessions.set(sessionId, session);
 
+      // Save session to database
+      if (this.db) {
+        try {
+          await this.db.saveSession({
+            session_id: sessionId,
+            name: name,
+            user_id: userId,
+            status: 'initializing',
+            phone_number: null,
+            created_at: session.createdAt,
+            last_activity: session.lastActivity,
+            uptime_start: session.createdAt
+          });
+          logger.info(`Session ${sessionId} saved to database`);
+        } catch (error) {
+          logger.error(`Failed to save session ${sessionId} to database:`, error);
+        }
+      }
+
       logger.info(`Session ${sessionId} (${name}) created successfully`);
 
       return {
@@ -108,10 +132,19 @@ class WhatsAppSessionManager {
       }
     });
 
-    client.on('authenticated', () => {
+    client.on('authenticated', async () => {
       session.status = 'authenticated';
       session.qrCode = null;
       this.qrCodes.delete(sessionId);
+
+      // Update database
+      if (this.db) {
+        try {
+          await this.db.updateSessionStatus(sessionId, 'authenticated', null);
+        } catch (error) {
+          logger.error(`Failed to update session ${sessionId} status in database:`, error);
+        }
+      }
 
       this.io.emit('session:status', {
         sessionId,
@@ -121,11 +154,21 @@ class WhatsAppSessionManager {
       logger.info(`Session ${sessionId} authenticated successfully`);
     });
 
-    client.on('ready', () => {
+    client.on('ready', async () => {
       session.status = 'ready';
       session.connected = true;
       session.phoneNumber = client.info?.wid?.user;
       session.lastActivity = new Date().toISOString();
+
+      // Update database
+      if (this.db) {
+        try {
+          await this.db.updateSessionStatus(sessionId, 'ready', session.phoneNumber);
+          await this.db.updateSessionActivity(sessionId);
+        } catch (error) {
+          logger.error(`Failed to update session ${sessionId} in database:`, error);
+        }
+      }
 
       this.io.emit('session:status', {
         sessionId,
@@ -163,9 +206,18 @@ class WhatsAppSessionManager {
       }
     });
 
-    client.on('disconnected', (reason) => {
+    client.on('disconnected', async (reason) => {
       session.status = 'disconnected';
       session.connected = false;
+
+      // Update database
+      if (this.db) {
+        try {
+          await this.db.updateSessionStatus(sessionId, 'disconnected', session.phoneNumber);
+        } catch (error) {
+          logger.error(`Failed to update session ${sessionId} status in database:`, error);
+        }
+      }
 
       this.io.emit('session:status', {
         sessionId,
@@ -177,9 +229,19 @@ class WhatsAppSessionManager {
       logger.warn(`Session ${sessionId} disconnected: ${reason}`);
     });
 
-    client.on('auth_failure', (message) => {
+    client.on('auth_failure', async (message) => {
       session.status = 'auth_failure';
       session.connected = false;
+
+      // Update database
+      if (this.db) {
+        try {
+          await this.db.updateSessionStatus(sessionId, 'auth_failure', session.phoneNumber);
+          await this.db.incrementSessionErrors(sessionId);
+        } catch (error) {
+          logger.error(`Failed to update session ${sessionId} status in database:`, error);
+        }
+      }
 
       this.io.emit('session:status', {
         sessionId,
@@ -210,6 +272,15 @@ class WhatsAppSessionManager {
 
       await fs.remove(sessionPath);
       await fs.remove(qrPath);
+
+      // Remove from database
+      if (this.db) {
+        try {
+          await this.db.deleteSession(sessionId);
+        } catch (error) {
+          logger.error(`Failed to delete session ${sessionId} from database:`, error);
+        }
+      }
 
       // Remove from memory
       this.sessions.delete(sessionId);
@@ -358,6 +429,17 @@ class WhatsAppSessionManager {
   }
 
   async getSessionsMetrics() {
+    // If database is available, get metrics from database (persistent)
+    if (this.db) {
+      try {
+        return await this.db.getSessionsMetrics();
+      } catch (error) {
+        logger.error('Failed to get sessions metrics from database:', error);
+        // Fall back to memory-based metrics
+      }
+    }
+
+    // Fallback: memory-based metrics
     const sessions = Array.from(this.sessions.values());
     const statusCounts = sessions.reduce((acc, session) => {
       acc[session.status] = (acc[session.status] || 0) + 1;

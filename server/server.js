@@ -737,6 +737,9 @@ async function startServer() {
     // Initialize database
     await db.initialize();
     
+    // Connect database to session manager
+    sessionManager.setDatabaseManager(db);
+    
     // Create default admin user if it doesn't exist
     const adminExists = await db.getUserByUsername('admin');
     if (!adminExists) {

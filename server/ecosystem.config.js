@@ -4,13 +4,17 @@ module.exports = {
     script: 'server.js',
     cwd: '/var/www/whatsapp-api/server',
     instances: 1,
-    exec_mode: 'fork', // Use fork mode for WhatsApp Web sessions
+    exec_mode: 'fork',
     watch: false,
     max_memory_restart: '2G',
     min_uptime: '10s',
     max_restarts: 5,
     autorestart: true,
     restart_delay: 4000,
+    
+    // User configuration
+    uid: 'whatsapp',
+    gid: 'whatsapp',
     
     // Environment variables
     env: {

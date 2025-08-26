@@ -92,7 +92,7 @@ class MigrationManager {
             const executedMigrations = await this.getExecutedMigrations();
             
             const pending = migrationFiles
-                .filter(file => file.endsWith('.sql') && file !== 'migrate.js')
+                .filter(file => file.endsWith('.sql') && file !== 'migrate.js' && !file.includes('_rollback'))
                 .map(file => {
                     const version = file.replace('.sql', '');
                     return { version, filename: file };

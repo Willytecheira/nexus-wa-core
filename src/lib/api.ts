@@ -54,6 +54,9 @@ class ApiClient {
   private async request<T = any>(endpoint: string, options: RequestInit = {}): Promise<ApiResponse<T>> {
     const url = `${this.baseUrl}${endpoint}`;
     
+    console.log('Making API request to:', url);
+    console.log('With token:', this.token ? 'Present' : 'Missing');
+    
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     };
@@ -73,7 +76,11 @@ class ApiClient {
         credentials: 'include',
       });
 
+      console.log('Response status:', response.status);
+      console.log('Response headers:', Object.fromEntries(response.headers.entries()));
+
       const data = await response.json();
+      console.log('Response data:', data);
 
       if (!response.ok) {
         throw new Error(data.message || data.error || `HTTP ${response.status}`);
@@ -93,6 +100,7 @@ class ApiClient {
         data: data
       } as ApiResponse<T>;
     } catch (error) {
+      console.error('Request error:', error);
       if (error instanceof Error) {
         throw error;
       }

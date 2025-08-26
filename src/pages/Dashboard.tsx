@@ -57,14 +57,18 @@ interface TransformedMetrics {
 // Fetch real metrics from API
 const fetchMetrics = async (): Promise<ApiMetrics | null> => {
   try {
+    console.log('Fetching metrics from:', apiClient.getToken() ? 'Authenticated' : 'Not authenticated');
     const response = await apiClient.getMetrics();
+    console.log('Metrics response:', response);
+    
     if (response.success && response.data) {
       return response.data as ApiMetrics;
     }
     throw new Error(response.error || 'Failed to fetch metrics');
   } catch (error) {
     console.error('Error fetching metrics:', error);
-    toast.error('Failed to load dashboard metrics');
+    console.error('API URL being used:', apiClient);
+    toast.error(`Failed to load dashboard metrics: ${error instanceof Error ? error.message : 'Unknown error'}`);
     return null;
   }
 };

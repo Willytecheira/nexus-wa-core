@@ -353,6 +353,10 @@ class WhatsAppSessionManager {
     return Array.from(this.sessions.values()).filter(s => s.connected).length;
   }
 
+  async getTotalSessionCount() {
+    return this.sessions.size;
+  }
+
   async getSessionsMetrics() {
     const sessions = Array.from(this.sessions.values());
     const statusCounts = sessions.reduce((acc, session) => {

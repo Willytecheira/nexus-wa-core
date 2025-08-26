@@ -443,6 +443,40 @@ class DatabaseManager {
     return result.count;
   }
 
+  async getDeliveredMessageCount() {
+    const result = await this.get("SELECT COUNT(*) as count FROM messages WHERE status = 'delivered'");
+    return result.count;
+  }
+
+  async getFailedMessageCount() {
+    const result = await this.get("SELECT COUNT(*) as count FROM messages WHERE status = 'failed'");
+    return result.count;
+  }
+
+  async getMessagesByDay(days = 7) {
+    const messages = await this.all(`
+      SELECT 
+        DATE(timestamp) as date,
+        COUNT(*) as count
+      FROM messages 
+      WHERE timestamp >= datetime('now', '-${days} days')
+      GROUP BY DATE(timestamp)
+      ORDER BY date
+    `);
+    return messages;
+  }
+
+  async getMessagesByType() {
+    const messages = await this.all(`
+      SELECT 
+        message_type as type,
+        COUNT(*) as count
+      FROM messages
+      GROUP BY message_type
+    `);
+    return messages;
+  }
+
   async getMessagesMetrics() {
     // Get messages per hour for the last 24 hours
     const hourlyMessages = await this.all(`

@@ -12,6 +12,8 @@ import {
   Calendar,
   PieChart
 } from 'lucide-react';
+import { apiClient } from '@/lib/api';
+import { toast } from 'sonner';
 
 interface AnalyticsData {
   totalMessages: number;
@@ -40,29 +42,15 @@ export default function Analytics() {
   const loadAnalytics = async () => {
     setLoading(true);
     try {
-      // Mock data for now - replace with actual API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      setAnalyticsData({
-        totalMessages: 1250,
-        deliveryRate: 94.2,
-        activeSessions: 8,
-        failedMessages: 73,
-        messagesByDay: [
-          { date: '2024-01-01', count: 45 },
-          { date: '2024-01-02', count: 67 },
-          { date: '2024-01-03', count: 89 },
-          { date: '2024-01-04', count: 123 },
-          { date: '2024-01-05', count: 156 }
-        ],
-        messagesByType: [
-          { type: 'text', count: 890 },
-          { type: 'image', count: 240 },
-          { type: 'document', count: 120 }
-        ]
-      });
+      const response = await apiClient.getAnalytics();
+      if (response.success && response.data) {
+        setAnalyticsData(response.data);
+      } else {
+        toast.error('Failed to load analytics data');
+      }
     } catch (error) {
       console.error('Failed to load analytics:', error);
+      toast.error('Failed to load analytics data');
     } finally {
       setLoading(false);
     }

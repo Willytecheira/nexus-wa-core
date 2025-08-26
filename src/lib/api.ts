@@ -164,7 +164,7 @@ class ApiClient {
     return this.request('/sessions/metrics');
   }
 
-  async getMetrics(): Promise<ApiResponse> {
+  async getMetricsOld(): Promise<ApiResponse> {
     return this.request('/metrics');
   }
 
@@ -249,6 +249,30 @@ class ApiClient {
     return this.request(`/users/${userId}`, {
       method: 'DELETE',
     });
+  }
+
+  // Get metrics
+  async getMetrics(): Promise<ApiResponse<any>> {
+    return this.request('/metrics/dashboard');
+  }
+
+  // Get analytics
+  async getAnalytics(): Promise<ApiResponse<any>> {
+    return this.request('/analytics');
+  }
+
+  // Get logs
+  async getLogs(params?: { limit?: number; level?: string }): Promise<ApiResponse<any>> {
+    const query = new URLSearchParams();
+    if (params?.limit) query.set('limit', params.limit.toString());
+    if (params?.level) query.set('level', params.level);
+    
+    return this.request(`/logs${query.toString() ? '?' + query.toString() : ''}`);
+  }
+
+  // Get health
+  async getHealth(): Promise<ApiResponse<any>> {
+    return this.request('/health');
   }
 
   setToken(token: string) {

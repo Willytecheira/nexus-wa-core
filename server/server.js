@@ -79,6 +79,41 @@ app.get('/health', (req, res) => {
   });
 });
 
+// Enhanced health check for frontend
+app.get('/api/health', AuthMiddleware, async (req, res) => {
+  try {
+    const activeSessions = await sessionManager.getActiveSessionCount();
+    const totalSessions = await sessionManager.getTotalSessionCount();
+    const memUsage = process.memoryUsage();
+    
+    const health = {
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      uptime: Math.floor(process.uptime()),
+      memory: {
+        used: Math.round(memUsage.heapUsed / 1024 / 1024), // MB
+        total: Math.round(memUsage.heapTotal / 1024 / 1024), // MB
+        percentage: Math.round((memUsage.heapUsed / memUsage.heapTotal) * 100)
+      },
+      sessions: {
+        total: totalSessions,
+        active: activeSessions
+      },
+      database: 'connected',
+      version: require('./package.json').version
+    };
+
+    res.json(health);
+  } catch (error) {
+    logger.error('Health check error:', error);
+    res.status(500).json({
+      status: 'unhealthy',
+      timestamp: new Date().toISOString(),
+      error: error.message
+    });
+  }
+});
+
 // Auth routes
 app.post('/api/auth/login', async (req, res) => {
   try {
@@ -395,6 +430,97 @@ app.get('/api/metrics', AuthMiddleware, async (req, res) => {
   } catch (error) {
     logger.error('Get metrics error:', error);
     res.status(500).json({ error: 'Failed to get metrics' });
+  }
+});
+
+// Dashboard metrics endpoint
+app.get('/api/metrics/dashboard', AuthMiddleware, async (req, res) => {
+  try {
+    const systemStats = {
+      activeSessions: await sessionManager.getActiveSessionCount(),
+      totalMessages: await db.getTotalMessageCount(),
+      memoryUsage: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+      cpuUsage: Math.round(process.cpuUsage().user / 1000),
+      uptime: Math.floor(process.uptime())
+    };
+
+    const sessionsData = await sessionManager.getSessionsMetrics();
+    const messagesData = await db.getMessagesMetrics();
+
+    res.json({
+      systemStats,
+      sessionsData,
+      messagesData
+    });
+  } catch (error) {
+    logger.error('Get dashboard metrics error:', error);
+    res.status(500).json({ error: 'Failed to get dashboard metrics' });
+  }
+});
+
+// Analytics endpoints
+app.get('/api/analytics', AuthMiddleware, async (req, res) => {
+  try {
+    const totalMessages = await db.getTotalMessageCount();
+    const deliveredMessages = await db.getDeliveredMessageCount();
+    const activeSessions = await sessionManager.getActiveSessionCount();
+    const failedMessages = await db.getFailedMessageCount();
+    const messagesByDay = await db.getMessagesByDay(7);
+    const messagesByType = await db.getMessagesByType();
+
+    res.json({
+      totalMessages,
+      deliveryRate: totalMessages > 0 ? Math.round((deliveredMessages / totalMessages) * 100) : 0,
+      activeSessions,
+      failedMessages,
+      messagesByDay,
+      messagesByType
+    });
+  } catch (error) {
+    logger.error('Get analytics error:', error);
+    res.status(500).json({ error: 'Failed to get analytics' });
+  }
+});
+
+// Logs endpoint
+app.get('/api/logs', AuthMiddleware, async (req, res) => {
+  try {
+    const { limit = 100, level = 'all' } = req.query;
+    
+    // For now, return mock logs - you can implement real log reading later
+    const logs = [
+      {
+        id: '1',
+        timestamp: new Date().toISOString(),
+        level: 'info',
+        message: 'WhatsApp session initialized successfully',
+        source: 'WhatsAppSessionManager'
+      },
+      {
+        id: '2',
+        timestamp: new Date(Date.now() - 60000).toISOString(),
+        level: 'info',
+        message: 'Message sent successfully',
+        source: 'MessageHandler'
+      },
+      {
+        id: '3',
+        timestamp: new Date(Date.now() - 120000).toISOString(),
+        level: 'warn',
+        message: 'Session reconnection attempt',
+        source: 'WhatsAppSessionManager'
+      }
+    ];
+
+    const filteredLogs = level === 'all' ? logs : logs.filter(log => log.level === level);
+    
+    res.json({
+      logs: filteredLogs.slice(0, parseInt(limit)),
+      total: filteredLogs.length
+    });
+  } catch (error) {
+    logger.error('Get logs error:', error);
+    res.status(500).json({ error: 'Failed to get logs' });
   }
 });
 

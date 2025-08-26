@@ -176,7 +176,7 @@ class ApiClient {
     });
   }
 
-  async getMessages(page = 1, limit = 20, sessionId?: string): Promise<ApiResponse> {
+  async getMessages(page = 1, limit = 20, sessionId?: string): Promise<ApiResponse<any[]>> {
     const params = new URLSearchParams({
       page: page.toString(),
       limit: limit.toString(),

@@ -85,7 +85,9 @@ export default function Messages() {
       }
 
       if (messagesResponse.success && messagesResponse.data) {
-        setMessages(messagesResponse.data);
+        // Ensure we have an array
+        const messagesArray = Array.isArray(messagesResponse.data) ? messagesResponse.data : [];
+        setMessages(messagesArray);
       }
     } catch (error) {
       toast.error('Failed to load data');

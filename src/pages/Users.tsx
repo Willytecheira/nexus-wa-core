@@ -441,10 +441,10 @@ export default function Users() {
                         </Badge>
                       </TableCell>
                       <TableCell className="text-muted-foreground">
-                        {user.lastLogin ? format(new Date(user.lastLogin), 'PPpp') : 'Never'}
+                        {user.lastLogin && !isNaN(new Date(user.lastLogin).getTime()) ? format(new Date(user.lastLogin), 'PPpp') : 'Never'}
                       </TableCell>
                       <TableCell className="text-muted-foreground">
-                        {format(new Date(user.createdAt), 'PPp')}
+                        {user.createdAt && !isNaN(new Date(user.createdAt).getTime()) ? format(new Date(user.createdAt), 'PPp') : 'Unknown'}
                       </TableCell>
                       <TableCell>
                         <DropdownMenu>

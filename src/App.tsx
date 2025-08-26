@@ -14,6 +14,9 @@ import Sessions from "./pages/Sessions";
 import Messages from "./pages/Messages";
 import Users from "./pages/Users";
 import Settings from "./pages/Settings";
+import Analytics from "./pages/Analytics";
+import Logs from "./pages/Logs";
+import Health from "./pages/Health";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -54,6 +57,27 @@ const App = () => (
                 <ProtectedRoute requiredRoles={['admin']}>
                   <Layout>
                     <Users />
+                  </Layout>
+                </ProtectedRoute>
+              } />
+              <Route path="/analytics" element={
+                <ProtectedRoute requiredRoles={['admin', 'operator', 'viewer']}>
+                  <Layout>
+                    <Analytics />
+                  </Layout>
+                </ProtectedRoute>
+              } />
+              <Route path="/logs" element={
+                <ProtectedRoute requiredRoles={['admin']}>
+                  <Layout>
+                    <Logs />
+                  </Layout>
+                </ProtectedRoute>
+              } />
+              <Route path="/health" element={
+                <ProtectedRoute requiredRoles={['admin', 'operator']}>
+                  <Layout>
+                    <Health />
                   </Layout>
                 </ProtectedRoute>
               } />

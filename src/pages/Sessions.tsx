@@ -49,10 +49,18 @@ export default function Sessions() {
 
   const loadSessions = async () => {
     try {
+      console.log('🔍 Loading sessions...');
       const response = await apiClient.getSessions();
+      console.log('📋 API Response:', response);
+      console.log('📋 Response data:', response?.data);
+      console.log('📋 Response success:', response?.success);
+      
       if (response.success && response.data) {
+        console.log('✅ Sessions loaded successfully:', response.data.length, 'sessions');
         setSessions(response.data);
       } else {
+        console.error('❌ Failed to load sessions:', response.error || 'Unknown error');
+        console.log('📋 Full response object:', JSON.stringify(response, null, 2));
         toast({
           title: "Error",
           description: response.error || "Failed to load sessions",
@@ -60,7 +68,7 @@ export default function Sessions() {
         });
       }
     } catch (error) {
-      console.error('Load sessions error:', error);
+      console.error('💥 Error loading sessions:', error);
       toast({
         title: "Error",
         description: "Failed to load sessions",

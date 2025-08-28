@@ -49,7 +49,7 @@ export default function Sessions() {
 
   const loadSessions = async () => {
     try {
-      const response = await apiClient.getSessionsMetrics();
+      const response = await apiClient.getSessions();
       if (response.success && response.data) {
         setSessions(response.data);
       } else {

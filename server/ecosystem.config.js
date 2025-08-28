@@ -30,6 +30,13 @@ module.exports = {
       LOG_LEVEL: 'debug'
     },
     
+    // Production environment
+    env_production: {
+      NODE_ENV: 'production',
+      PORT: 3000,
+      LOG_LEVEL: 'info'
+    },
+    
     // Logging
     log_file: './logs/combined.log',
     out_file: './logs/out.log',

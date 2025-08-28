@@ -178,9 +178,17 @@ class ApiClient {
 
   // Message Methods
   async sendMessage(messageData: { sessionId: string; phone: string; message: string; type: string }): Promise<ApiResponse> {
+    // Transform phone to 'to' for backend compatibility
+    const backendData = {
+      sessionId: messageData.sessionId,
+      to: messageData.phone,
+      message: messageData.message,
+      type: messageData.type
+    };
+    
     return this.request('/messages/send', {
       method: 'POST',
-      body: JSON.stringify(messageData),
+      body: JSON.stringify(backendData),
     });
   }
 

@@ -753,11 +753,16 @@ async function startServer() {
       logger.info('Default admin user created');
     }
 
+    // Restore sessions from database
+    logger.info('🔄 Restoring sessions from database...');
+    await sessionManager.restoreSessionsFromDatabase();
+
     // Start server
     server.listen(PORT, () => {
       logger.info(`🚀 WhatsApp Multi-Session API Server running on port ${PORT}`);
       logger.info(`📊 Health check: http://localhost:${PORT}/health`);
       logger.info(`🔗 Environment: ${process.env.NODE_ENV || 'development'}`);
+      logger.info('✅ Session restoration completed');
     });
 
     // Graceful shutdown handling

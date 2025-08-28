@@ -17,6 +17,120 @@ class WhatsAppSessionManager {
     this.db = dbManager;
   }
 
+  // Restore sessions from database on server startup
+  async restoreSessionsFromDatabase() {
+    if (!this.db) {
+      logger.warn('No database manager available for session restoration');
+      return;
+    }
+
+    try {
+      logger.info('🔄 Starting session restoration from database...');
+      const savedSessions = await this.db.getAllSessions();
+      
+      if (!savedSessions || savedSessions.length === 0) {
+        logger.info('📭 No sessions found in database to restore');
+        return;
+      }
+
+      logger.info(`📦 Found ${savedSessions.length} sessions to restore`);
+      let restoredCount = 0;
+      let failedCount = 0;
+
+      for (const sessionData of savedSessions) {
+        try {
+          const { session_id, name, user_id, status } = sessionData;
+          
+          // Check if session files exist
+          const sessionPath = path.join(__dirname, '..', 'sessions', session_id);
+          if (!await fs.pathExists(sessionPath)) {
+            logger.warn(`⚠️  Session files not found for ${name} (${session_id}), skipping...`);
+            // Update status to disconnected in database
+            await this.db.updateSessionStatus(session_id, 'disconnected');
+            failedCount++;
+            continue;
+          }
+
+          // Only restore if session was previously connected or ready
+          if (status === 'connected' || status === 'ready' || status === 'authenticated') {
+            logger.info(`🔧 Restoring session: ${name} (${session_id})`);
+            
+            // Create the WhatsApp client
+            const client = new Client({
+              authStrategy: new LocalAuth({
+                clientId: session_id,
+                dataPath: sessionPath
+              }),
+              puppeteer: {
+                headless: true,
+                args: [
+                  '--no-sandbox',
+                  '--disable-setuid-sandbox',
+                  '--disable-dev-shm-usage',
+                  '--disable-accelerated-2d-canvas',
+                  '--no-first-run',
+                  '--no-zygote',
+                  '--single-process',
+                  '--disable-gpu'
+                ]
+              }
+            });
+
+            const session = {
+              id: session_id,
+              name,
+              userId: user_id,
+              client,
+              status: 'connecting',
+              createdAt: new Date(),
+              phoneNumber: null,
+              isReady: false,
+              messagesSent: 0,
+              messagesReceived: 0,
+              lastActivity: new Date()
+            };
+
+            // Setup event handlers
+            await this.setupClientEvents(session);
+            
+            // Store session in memory
+            this.sessions.set(session_id, session);
+            
+            // Initialize the client (this will attempt to restore the session)
+            await client.initialize();
+            
+            // Update status to connecting in database
+            await this.db.updateSessionStatus(session_id, 'connecting');
+            
+            restoredCount++;
+            logger.info(`✅ Session ${name} queued for restoration`);
+            
+          } else {
+            logger.info(`⏭️  Skipping session ${name} (${session_id}) - status: ${status}`);
+            failedCount++;
+          }
+          
+        } catch (sessionError) {
+          logger.error(`❌ Failed to restore session ${sessionData.name}:`, sessionError);
+          failedCount++;
+          
+          // Update status to disconnected in database
+          if (sessionData.session_id) {
+            await this.db.updateSessionStatus(sessionData.session_id, 'disconnected');
+          }
+        }
+      }
+
+      logger.info(`🎉 Session restoration completed: ${restoredCount} restored, ${failedCount} failed`);
+      
+      // Emit session list update
+      this.io.emit('sessions:updated', this.getAllSessions());
+      
+    } catch (error) {
+      logger.error('❌ Error during session restoration:', error);
+    }
+  }
+
   async createSession(name, userId) {
     const sessionId = uuidv4();
     const sessionPath = path.join(__dirname, '..', 'sessions', sessionId);

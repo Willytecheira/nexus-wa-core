@@ -235,7 +235,7 @@ class DatabaseManager {
 
   // Session management methods
   async saveSession(sessionData) {
-    const { id, name, status, phoneNumber, userId } = sessionData;
+    const { id, name, status, phoneNumber, userId = 'system' } = sessionData;
     
     await this.run(
       'INSERT OR REPLACE INTO sessions (id, name, status, phone_number, user_id, last_activity) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)',
@@ -392,7 +392,7 @@ class DatabaseManager {
   // Message management methods
   async saveMessage(messageData) {
     const {
-      id, sessionId, from, to, message, type, status, timestamp, userId, isIncoming = false, mediaUrl = null
+      id, sessionId, from, to, message, type, status, timestamp, userId = 'system', isIncoming = false, mediaUrl = null
     } = messageData;
 
     await this.run(

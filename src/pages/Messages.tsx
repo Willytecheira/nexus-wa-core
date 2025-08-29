@@ -98,13 +98,28 @@ export default function Messages() {
 
   const onSubmit = async (data: MessageForm) => {
     setSendingMessage(true);
+    
+    // Debug logging
+    console.log('=== SENDING MESSAGE DEBUG ===');
+    console.log('Form data:', data);
+    console.log('API Client token:', apiClient.getToken());
+    console.log('Selected session:', sessions.find(s => s.id === data.sessionId));
+    
     try {
-      const response = await apiClient.sendMessage({
+      const payload = {
         sessionId: data.sessionId,
         phone: data.phone,
         message: data.message,
         type: data.type,
-      });
+      };
+      
+      console.log('Sending payload:', payload);
+      
+      const response = await apiClient.sendMessage(payload);
+      
+      console.log('API Response:', response);
+      console.log('Response success:', response.success);
+      console.log('Response error:', response.error);
 
       if (response.success) {
         toast.success('Message sent successfully!');
@@ -112,12 +127,20 @@ export default function Messages() {
         // Refresh messages to show the new one
         loadData();
       } else {
+        console.error('Send message failed:', response.error);
         toast.error(response.error || 'Failed to send message');
       }
     } catch (error) {
-      toast.error('Failed to send message');
+      console.error('Send message exception:', error);
+      console.error('Error details:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name
+      });
+      toast.error(`Failed to send message: ${error.message || 'Unknown error'}`);
     } finally {
       setSendingMessage(false);
+      console.log('=== SEND MESSAGE DEBUG END ===');
     }
   };
 

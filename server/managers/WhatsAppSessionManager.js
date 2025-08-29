@@ -469,32 +469,82 @@ class WhatsAppSessionManager {
   }
 
   async sendMessage(sessionId, to, message, type = 'text') {
+    logger.info('=== SESSION MANAGER SEND MESSAGE DEBUG ===');
+    logger.info('Parameters:', { sessionId, to, message, type });
+    
     const session = this.sessions.get(sessionId);
+    logger.info('Session lookup:', { 
+      sessionId, 
+      sessionExists: !!session,
+      sessionStatus: session?.status,
+      sessionConnected: session?.connected,
+      clientExists: !!session?.client,
+      totalSessions: this.sessions.size
+    });
+    
     if (!session) {
+      logger.error('Session not found:', sessionId);
+      logger.error('Available sessions:', Array.from(this.sessions.keys()));
       throw new Error('Session not found');
     }
 
     if (session.status !== 'ready' || !session.connected) {
-      throw new Error('Session is not ready to send messages');
+      logger.error('Session not ready:', { 
+        sessionId,
+        status: session.status, 
+        connected: session.connected,
+        readyState: session.status === 'ready',
+        bothReady: session.status === 'ready' && session.connected
+      });
+      throw new Error(`Session is not ready to send messages. Status: ${session.status}, Connected: ${session.connected}`);
+    }
+
+    if (!session.client) {
+      logger.error('WhatsApp client not initialized for session:', sessionId);
+      throw new Error('WhatsApp client not initialized');
     }
 
     try {
+      logger.info('Sending message...');
       let result;
 
       // Format phone number
       const chatId = to.includes('@c.us') ? to : `${to}@c.us`;
+      logger.info('Chat ID formatted:', { original: to, formatted: chatId });
 
       if (type === 'text') {
+        logger.info('Sending text message via WhatsApp client...');
         result = await session.client.sendMessage(chatId, message);
+        logger.info('WhatsApp client response:', { 
+          success: !!result,
+          messageId: result?.id?.id,
+          ack: result?.ack,
+          timestamp: result?.timestamp
+        });
       } else if (type === 'media') {
+        logger.info('Sending media message...');
         // Handle media messages
         const media = MessageMedia.fromFilePath(message);
         result = await session.client.sendMessage(chatId, media);
+        logger.info('Media message sent:', { messageId: result?.id?.id });
+      } else {
+        logger.error('Unsupported message type:', type);
+        throw new Error(`Unsupported message type: ${type}`);
       }
 
       session.lastActivity = new Date().toISOString();
 
-      logger.info(`Message sent from session ${sessionId} to ${to}`);
+      // Update message count if database is available
+      if (this.db) {
+        try {
+          await this.db.incrementSessionMessageCount(sessionId, 'sent');
+        } catch (dbError) {
+          logger.error('Failed to update message count in database:', dbError);
+        }
+      }
+
+      logger.info(`Message sent successfully from session ${sessionId} to ${to}`);
+      logger.info('=== SESSION MANAGER SEND MESSAGE DEBUG END ===');
 
       return {
         success: true,
@@ -503,10 +553,32 @@ class WhatsAppSessionManager {
       };
 
     } catch (error) {
+      logger.error('=== SESSION MANAGER SEND MESSAGE ERROR ===');
       logger.error(`Failed to send message from session ${sessionId}:`, error);
+      logger.error('Error details:', {
+        name: error.name,
+        message: error.message,
+        stack: error.stack,
+        code: error.code
+      });
+
+      // Update error count if database is available
+      if (this.db) {
+        try {
+          await this.db.incrementSessionErrors(sessionId);
+        } catch (dbError) {
+          logger.error('Failed to update error count in database:', dbError);
+        }
+      }
+
+      logger.error('=== SESSION MANAGER SEND MESSAGE ERROR END ===');
       return {
         success: false,
-        error: error.message
+        error: error.message,
+        details: {
+          name: error.name,
+          code: error.code
+        }
       };
     }
   }

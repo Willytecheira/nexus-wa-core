@@ -281,16 +281,45 @@ app.get('/api/messages', AuthMiddleware, async (req, res) => {
 
 app.post('/api/messages/send', AuthMiddleware, async (req, res) => {
   try {
+    logger.info('=== SEND MESSAGE REQUEST DEBUG ===');
+    logger.info('Request body:', req.body);
+    logger.info('User:', { id: req.user.id, username: req.user.username });
+    
     const { sessionId, to, message, type = 'text' } = req.body;
 
+    logger.info('Extracted data:', { sessionId, to, message, type });
+
     if (!sessionId || !to || !message) {
+      logger.error('Missing required fields:', { sessionId: !!sessionId, to: !!to, message: !!message });
       return res.status(400).json({ error: 'Session ID, recipient, and message are required' });
     }
 
+    // Check session status before sending
+    const session = sessionManager.getSession(sessionId);
+    logger.info('Session status:', { 
+      sessionId, 
+      exists: !!session, 
+      status: session?.status, 
+      phone: session?.phone_number,
+      ready: session?.status === 'ready'
+    });
+
+    if (!session) {
+      logger.error('Session not found:', sessionId);
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    if (session.status !== 'ready') {
+      logger.error('Session not ready:', { sessionId, status: session.status });
+      return res.status(400).json({ error: `Session not ready. Current status: ${session.status}` });
+    }
+
+    logger.info('Attempting to send message via sessionManager...');
     const result = await sessionManager.sendMessage(sessionId, to, message, type);
+    logger.info('SessionManager result:', result);
     
     // Save message to database
-    await db.saveMessage({
+    const messageData = {
       id: uuidv4(),
       sessionId,
       from: 'system',
@@ -300,14 +329,22 @@ app.post('/api/messages/send', AuthMiddleware, async (req, res) => {
       status: result.success ? 'sent' : 'failed',
       timestamp: new Date().toISOString(),
       userId: req.user.id
-    });
+    };
+    
+    logger.info('Saving message to database:', messageData);
+    await db.saveMessage(messageData);
 
+    logger.info('Sending response:', result);
     res.json(result);
     
-    logger.info(`Message sent from session ${sessionId} to ${to} by ${req.user.username}`);
+    logger.info(`Message sent from session ${sessionId} to ${to} by ${req.user.username} - Success: ${result.success}`);
+    logger.info('=== SEND MESSAGE REQUEST DEBUG END ===');
   } catch (error) {
+    logger.error('=== SEND MESSAGE ERROR ===');
     logger.error('Send message error:', error);
-    res.status(500).json({ error: 'Failed to send message' });
+    logger.error('Error stack:', error.stack);
+    logger.error('=== SEND MESSAGE ERROR END ===');
+    res.status(500).json({ error: 'Failed to send message', details: error.message });
   }
 });
 
